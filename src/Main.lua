@@ -141,6 +141,7 @@ function AddOn:OnTaxiMapOpened(...)
 end
 --------------------------------
 function AddOn:OnHideWorldMapFrame()
+	GameTooltip:Hide() -- cover edge case when TaxiNodeOnButtonLeave isn't fired when selecting a destination
 	if AddOn.flightMasterName then
 		AddOn:HideTaxiButtons()
 		if AddOn.hooks[TaxiFrame] and AddOn.hooks[TaxiFrame].OnHide then
