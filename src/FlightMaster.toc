@@ -1,0 +1,8 @@
+﻿## Title: 
+## Description:
+## Version:
+## Author: 
+## Interface: 
+## SavedVariables:
+embeds.xml
+Main.lua 

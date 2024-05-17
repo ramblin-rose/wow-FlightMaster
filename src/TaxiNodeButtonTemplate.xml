@@ -1,0 +1,35 @@
+<Ui xmlns="http://www.blizzard.com/wow/ui/" 
+            xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+            xsi:schemaLocation="http://www.blizzard.com/wow/ui/
+..\FrameXML\UI.xsd">
+    <Script file="Main.lua"/>
+	<Button name="TaxiNodeButtonTemplate" hidden="true" parent="TaxiFrame" virtual="true">
+		<Size>
+			<AbsDimension x="14" y="14"/>
+		</Size>
+		<Anchors>
+			<Anchor point="BOTTOMRIGHT"/>
+		</Anchors>
+		<Scripts>
+            <OnEnter>
+				FlightMaster:TaxiNodeOnButtonEnter(self)			
+			</OnEnter>
+            <OnLeave>			
+				FlightMaster:TaxiNodeOnButtonEnter(self)		
+			</OnLeave>
+ 			<OnClick>
+				TakeTaxiNode(self:GetID())
+			</OnClick>
+		</Scripts>
+		<HighlightTexture file="Interface\TaxiFrame\UI-Taxi-Icon-Highlight">
+			<Size x="32" y="32"/>
+			<Anchors>
+				<Anchor point="CENTER">
+					<Offset>
+						<AbsDimension x="0" y="0"/>
+					</Offset>
+				</Anchor>
+			</Anchors>
+		</HighlightTexture>
+	</Button>
+</Ui>
