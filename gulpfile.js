@@ -22,10 +22,9 @@ class util {
 
 const SRC = "src";
 let DEST = path.join(
-  process.env.WOW_ADDON_PATH,
+  process.env.WOW_ADDON_DEST_FOLDER,
   packageJson.title.replace(/\s+/gm, "")
 );
-
 
 const MERCH_CONFIG = {
   watchers: [
