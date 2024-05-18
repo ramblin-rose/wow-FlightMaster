@@ -2148,3 +2148,5 @@ node_modules/zip-stream/node_modules/readable-stream/lib/internal/streams/stream
 dist/Flight Master-0.0.1.zip
 .vscode/settings.json
 dist/Flight Master-0.0.2.zip
+scratch.lua
+src/SpatialHash.lua

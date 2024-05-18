@@ -1,7 +1,7 @@
 {
   "name": "flight-master",
   "title": "Flight Master",
-  "version": "0.0.2",
+  "version": "0.0.3",
   "interface": "040400",
   "description": "A better flight master experience using continental maps",
   "main": "gulpfile.js",

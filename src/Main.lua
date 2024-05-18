@@ -1,5 +1,6 @@
 local AddOn = _G[select(1, ...)]
 local L = AddOn.L
+local VIEWPORT_ORIGIN = "TOPLEFT"
 --------------------------------
 function AddOn:OnInitialize()
 	local options = {
@@ -199,7 +200,7 @@ function AddOn:DisplayTaxiNode(button, nodeType, x, y)
 	button:ClearAllPoints()
 	button:SetNormalTexture(TaxiButtonTypes[nodeType].file)
 
-	button:SetPoint("CENTER", AddOn.frame, "TOPLEFT", x, y)
+	button:SetPoint("CENTER", AddOn.frame, VIEWPORT_ORIGIN, x, y)
 	button:SetNormalTexture(TaxiButtonTypes[nodeType].file)
 	button:GetHighlightTexture():SetAlpha(TaxiButtonTypes[nodeType].highlightBrightness)
 	button:Show()
@@ -257,6 +258,26 @@ function AddOn:GetTaxiNodeNudge(mapID, mapTaxiNode)
 	return nudge, key
 end
 --------------------------------
+-- returns x, y, shouldDisplay
+function AddOn:FinalizeNodePosition(mapInfo, mapTaxiNode, button, width, height)
+	local shouldDisplay = true
+	local x, y = mapTaxiNode.position.x * width, mapTaxiNode.position.y * -height
+	-- prevent dangling taxi nodes on the edge of zone maps
+	if mapInfo.mapType == 3 then
+		if x < 0 or x > (width - button:GetWidth()) then
+			shouldDisplay = false
+		elseif y > button:GetHeight() or math.abs(y) > (height - button:GetHeight()) then
+			shouldDisplay = false
+		end
+	end
+
+	-- soothe the irritation of overlapping mercurial boots. Serenity Now!
+	local nudge = AddOn:GetTaxiNodeNudge(mapInfo.mapID, mapTaxiNode)
+	x = x + nudge.x
+	y = y + nudge.y
+	return x, y, shouldDisplay
+end
+--------------------------------
 function AddOn:UpdateMapTaxiNodes()
 	local mapID = WorldMapFrame:GetMapID()
 	local mapInfo = C_Map.GetMapInfo(mapID)
@@ -289,7 +310,8 @@ function AddOn:UpdateMapTaxiNodes()
 			local nodeType, mapTaxiNode
 			local width = AddOn.frame:GetWidth()
 			local height = AddOn.frame:GetHeight()
-			local x, y
+			local posNode
+			local shouldDisplay
 
 			for i = 1, numNodes do
 				mapTaxiNode = mapTaxiNodes[TaxiNodeName(i)]
@@ -298,29 +320,16 @@ function AddOn:UpdateMapTaxiNodes()
 				if mapTaxiNode then
 					taxiNodePositions[i] = {
 						type = nodeType,
-						mapTaxiNode = mapTaxiNode,
-						name = mapTaxiNode.name,
-						x = mapTaxiNode.position.x,
-						y = mapTaxiNode.position.y,
+						node = mapTaxiNode,
 					}
 
-					x, y = mapTaxiNode.position.x * width, mapTaxiNode.position.y * -height
+					posNode = taxiNodePositions[i]
 
-					-- prevent dangling taxi nodes on the edge of zone maps
-					local onEdge = false
-					if mapInfo.mapType == 3 then
-						if x < 0 or x > (width - button:GetWidth()) then
-							onEdge = true
-						elseif y > button:GetHeight() or math.abs(y) > (height - button:GetHeight()) then
-							onEdge = true
-						end
-					end
-					if not onEdge then
-						-- soothe the irritation of overlapping mercurial boots. Serenity Now!
-						local nudge = AddOn:GetTaxiNodeNudge(mapID, mapTaxiNode)
-						x = x + nudge.x
-						y = y + nudge.y
-						AddOn:DisplayTaxiNode(button, nodeType, x, y)
+					posNode.x, posNode.y, shouldDisplay =
+						AddOn:FinalizeNodePosition(mapInfo, mapTaxiNode, button, width, height)
+
+					if shouldDisplay then
+						AddOn:DisplayTaxiNode(button, nodeType, posNode.x, posNode.y)
 					end
 				end
 			end
@@ -352,32 +361,17 @@ function AddOn:HideRouteLines()
 	end
 end
 --------------------------------
----@return number, number
 function AddOn:PerformRouteLineDraw(line, taxiNodeIndex, routeNodeIndex, frame)
 	local taxiNodePositions = AddOn.taxiNodePositions
-	local width = frame:GetWidth()
-	local height = frame:GetHeight()
-	local srcSlot, dstSlot
-	local sX, sY, dX, dY
-	local nudge
+	local src, dst
 	---@diagnostic disable-next-line: redundant-parameter
-	srcSlot = TaxiGetNodeSlot(taxiNodeIndex, routeNodeIndex, true)
-	nudge = AddOn:GetTaxiNodeNudge(AddOn.mapInfo.mapID, taxiNodePositions[srcSlot].mapTaxiNode)
-	sX = (taxiNodePositions[srcSlot].x + (nudge.x / 1000)) * width
-	sY = (1.0 - (taxiNodePositions[srcSlot].y + (nudge.y / -1000))) * height
-
+	src = taxiNodePositions[TaxiGetNodeSlot(taxiNodeIndex, routeNodeIndex, true)]
 	---@diagnostic disable-next-line: redundant-parameter
-	dstSlot = TaxiGetNodeSlot(taxiNodeIndex, routeNodeIndex, false)
-	if taxiNodePositions[dstSlot] then
-		nudge = AddOn:GetTaxiNodeNudge(AddOn.mapInfo.mapID, taxiNodePositions[dstSlot].mapTaxiNode)
-		dX = (taxiNodePositions[dstSlot].x + (nudge.x / 1000)) * width
-		dY = (1.0 - taxiNodePositions[dstSlot].y + (nudge.y / 1000)) * height
-
-		DrawLine(line, AddOn.frameRouteMap, sX, sY, dX, dY, 32, TAXIROUTE_LINEFACTOR)
+	dst = taxiNodePositions[TaxiGetNodeSlot(taxiNodeIndex, routeNodeIndex, false)]
+	if src and dst then
+		DrawLine(line, AddOn.frameRouteMap, src.x, src.y, dst.x, dst.y, 32, TAXIROUTE_LINEFACTOR, VIEWPORT_ORIGIN)
 		line:Show()
 	end
-	---@diagnostic disable-next-line: return-type-mismatch
-	return srcSlot, dstSlot
 end
 function AddOn:DrawOneHopLines()
 	if AddOn.mapInfo and AddOn.mapInfo.mapType == 2 then
@@ -423,10 +417,7 @@ function AddOn:TaxiNodeOnButtonEnter(button)
 	local numRoutes = GetNumRoutes(index)
 	local nodeType = TaxiNodeGetType(index)
 	local taxiButtons = AddOn.taxiButtons
-	local routeLines = AddOn.routeLines
 	local isZone = AddOn.mapInfo and AddOn.mapInfo.mapType ~= 2
-	local taxiNodePositions = AddOn.taxiNodePositions
-	local node = taxiNodePositions[index]
 	local line
 
 	AddOn:HideRouteLines()
@@ -446,23 +437,12 @@ function AddOn:TaxiNodeOnButtonEnter(button)
 
 	if nodeType == "REACHABLE" then
 		SetTooltipMoney(GameTooltip, TaxiNodeCost(button:GetID()))
-
 		if not isZone then
-			if numRoutes > #routeLines then
-				for i = #routeLines + 1, numRoutes do
-					AddOn:GetRouteLine(i)
-				end
-			end
-			local dstSlot
 			for i = 1, numRoutes do
 				line = AddOn:GetRouteLine(i)
 				if i <= numRoutes then
-					dstSlot = AddOn:PerformRouteLineDraw(line, index, i, AddOn.frameRouteMap)
-					nodeType = TaxiNodeGetType(dstSlot)
-					if nodeType == "DISTANT" then
-						button = taxiButtons[dstSlot]
-						button:Show()
-					end
+					AddOn:PerformRouteLineDraw(line, index, i, AddOn.frameRouteMap)
+					line:Show()
 				else
 					line:Hide()
 				end
@@ -471,7 +451,6 @@ function AddOn:TaxiNodeOnButtonEnter(button)
 	elseif nodeType == "UNREACHABLE" then
 		button:SetNormalTexture(TaxiButtonTypes[nodeType].hoverFile)
 		button:GetHighlightTexture():SetAlpha(TaxiButtonTypes[nodeType].highlightBrightness)
-		-- AddOn:HideRouteLines()
 	elseif nodeType == "CURRENT" then
 		GameTooltip:AddLine(TAXINODEYOUAREHERE, 1.0, 1.0, 1.0, true)
 		AddOn:DrawOneHopLines()
