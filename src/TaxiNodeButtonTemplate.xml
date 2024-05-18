@@ -18,7 +18,7 @@
 				FlightMaster:TaxiNodeOnButtonEnter(self)		
 			</OnLeave>
  			<OnClick>
-				TakeTaxiNode(self:GetID())
+				FlightMaster:TaxiTakeNode(self:GetID())
 			</OnClick>
 		</Scripts>
 		<HighlightTexture file="Interface\TaxiFrame\UI-Taxi-Icon-Highlight">

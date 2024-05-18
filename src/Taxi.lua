@@ -248,3 +248,7 @@ function AddOn:UpdateTaxiMap()
 		end
 	end
 end
+--------------------------------
+function AddOn:TaxiTakeNode(id)
+	TakeTaxiNode(id)
+end
