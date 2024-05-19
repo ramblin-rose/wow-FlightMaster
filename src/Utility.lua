@@ -92,6 +92,10 @@ local function printTable(table, color)
 	end
 end
 --------------------------------
+local function round(a)
+	return math.floor(a + 0.5)
+end
+--------------------------------
 AddOn.Utility = {
 	getItemIdFromLink = getItemIdFromLink,
 	getItemNameFromLink = getItemNameFromLink,
@@ -103,4 +107,5 @@ AddOn.Utility = {
 	getPrintableLink = getPrintableLink,
 	split = split,
 	printTable = printTable,
+	round = round,
 }

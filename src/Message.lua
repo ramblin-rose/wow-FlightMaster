@@ -1,24 +1,32 @@
 local AddOn = _G[select(1, ...)]
+--------------------------------
+function AddOn:InitMessage() end
+--------------------------------
+function AddOn:AddMessageHandler(message, fn)
+	assert(type(fn) == "function")
+	AddOn.messageHandler = AddOn.messageHandler or {}
 
-function AddOn:InitMessage()
-	AddOn.messageHandler = {
-		[AddOn.Message.ENABLE_ADDON] = AddOn.onEnableAddOn,
-		[AddOn.Message.DISABLE_ADDON] = AddOn.onDisableAddOn,
-	}
-	
-	AddOn:RegisterMessage(AddOn.Message.ENABLE_ADDON, function(...)
-		AddOn:onMessage(...)
-	end)
+	if not AddOn.messageHandler[message] then
+		AddOn.messageHandler[message] = {}
+	end
 
-	AddOn:RegisterMessage(AddOn.Message.DISABLE_ADDON, function(...)
+	AddOn.messageHandler[message][fn] = true
+
+	AddOn:RegisterMessage(message, function(...)
 		AddOn:onMessage(...)
 	end)
 end
-
+--------------------------------
+function AddOn:RemoveMessageHandler(message, fn)
+	AddOn.messageHandler = AddOn.messageHandler or {}
+	AddOn.messageHandler[message] = AddOn.messageHandler[message] or {}
+	AddOn.messageHandler[message][fn] = nil
+end
 --------------------------------
 function AddOn:onMessage(message, ...)
-	local handler = AddOn.messageHandler[message]
-	if type(handler) == "function" then
-		handler(...)
+	if AddOn.messageHandler and AddOn.messageHandler[message] then
+		for handler, _ in pairs(AddOn.messageHandler[message]) do
+			handler(...)
+		end
 	end
 end

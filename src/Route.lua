@@ -1,5 +1,8 @@
 local AddOn = _G[select(1, ...)]
 --------------------------------
+function AddOn:InitRoute()
+	AddOn.routeLines = {}
+end
 function AddOn:GetRouteLine(lineIndex)
 	local routeLines = AddOn.routeLines
 	local line

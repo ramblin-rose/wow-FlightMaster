@@ -1,16 +1,32 @@
 local AddOn = _G[select(1, ...)]
 --------------------------------
-function AddOn:OnInitialize()
+function AddOn:OnInitialize()	
 	AddOn:InitConfig()
 	AddOn:InitFrame()
 	AddOn:InitHook()
+	AddOn:InitMap()
 	AddOn:InitMessage()
+	AddOn:InitRoute()
 	AddOn:InitTaxi()
-
+	AddOn:InitTaxiLog()
+		
 	AddOn:SetEnabled(true)
+	AddOn:AddMessageHandler(AddOn.Message.ENABLE_ADDON, AddOn.onEnableAddOn)
+	AddOn:AddMessageHandler(AddOn.Message.DISABLE_ADDON, AddOn.onDisableAddOn)
 	AddOn:SendMessage(AddOn.Message.ENABLE_ADDON)
 end
-
+--------------------------------
+function AddOn:onEnableAddOn()
+	TaxiFrame:Hide()
+	WorldMapFrame:Hide()
+	AddOn:RegisterEvent("TAXIMAP_OPENED", AddOn.OnTaxiMapOpened)	
+end
+--------------------------------
+function AddOn:onDisableAddOn()
+	TaxiFrame:Hide()
+	WorldMapFrame:Hide()
+	AddOn:UnregisterEvent("TAXIMAP_OPENED")
+end
 --------------------------------
 function AddOn:OnHideTaxiFrame(...)
 	-- Do nothing stub. Deferring this event until the WorldMapFrame closes maintains the flight master context (taxi nodes)

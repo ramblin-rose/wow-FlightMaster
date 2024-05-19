@@ -3,7 +3,6 @@ local AddOn = _G[select(1, ...)]
 function AddOn:InitTaxi()
 	AddOn.taxiNodePositions = {}
 	AddOn.taxiButtons = {}
-	AddOn.routeLines = {}
 	AddOn.factionGroup = UnitFactionGroup("player")
 end
 --------------------------------
@@ -171,12 +170,13 @@ end
 -- returns x, y, shouldDisplay
 function AddOn:FinalizeNodePosition(mapInfo, mapTaxiNode, button, width, height)
 	local shouldDisplay = true
-	local x, y = mapTaxiNode.position.x * width, mapTaxiNode.position.y * -height
+	local x, y = AddOn:GetViewportXY(mapTaxiNode.position.x, mapTaxiNode.position.y, width, height)
 	-- prevent dangling taxi nodes on the edge of zone maps
 	if mapInfo.mapType == 3 then
-		if x < 0 or x > (width - button:GetWidth()) then
+		local w, h = button:GetWidth(), button:GetHeight()
+		if x < 0 or x > (width - w) then
 			shouldDisplay = false
-		elseif y > button:GetHeight() or math.abs(y) > (height - button:GetHeight()) then
+		elseif y > h or math.abs(y) > (height - h) then
 			shouldDisplay = false
 		end
 	end
@@ -197,7 +197,10 @@ function AddOn:UpdateTaxiMap()
 
 	AddOn:HideRouteLines()
 	AddOn:HideTaxiNodeButtons()
+
 	AddOn.mapInfo = nil
+	AddOn.sourceTaxiNode = nil
+
 	wipe(taxiNodePositions)
 	-- mapInfo.mapType 2 (continent) must match player continent;
 	-- mapInfo.mayType 3 (zone) must be a zone in player continent;
@@ -207,48 +210,53 @@ function AddOn:UpdateTaxiMap()
 		or (mapInfo.mapType == 3 and (AddOn:GetNearestContinentID(mapID) == playerContinentMapID))
 	then
 		local numNodes = NumTaxiNodes()
-		local button
 
 		AddOn.mapInfo = mapInfo
 		AddOn.frame:SetAllPoints()
 		AddOn.frameRouteMap:SetAllPoints()
+
 		AddOn:EnsureTaxiNodes(taxiButtons, numNodes)
 
 		local mapTaxiNodes = AddOn:GetMapTaxiNodes(mapID)
 
 		if mapTaxiNodes then
 			local nodeType, mapTaxiNode
-			local width = AddOn.frame:GetWidth()
-			local height = AddOn.frame:GetHeight()
-			local posNode
+			local taxiNodePos
 			local shouldDisplay
+			local width, height = AddOn:GetFrameDim()
 
 			for i = 1, numNodes do
 				mapTaxiNode = mapTaxiNodes[TaxiNodeName(i)]
-				button = taxiButtons[i]
 				nodeType = TaxiNodeGetType(i)
 				if mapTaxiNode then
 					taxiNodePositions[i] = {
 						type = nodeType,
 						node = mapTaxiNode,
+						-- x, y are calculated below and represent adjusted map coordinates
 					}
 
-					posNode = taxiNodePositions[i]
+					taxiNodePos = taxiNodePositions[i]
 
-					posNode.x, posNode.y, shouldDisplay =
-						AddOn:FinalizeNodePosition(mapInfo, mapTaxiNode, button, width, height)
+					taxiNodePos.x, taxiNodePos.y, shouldDisplay =
+						AddOn:FinalizeNodePosition(mapInfo, mapTaxiNode, taxiButtons[i], width, height)
+
+					if taxiNodePos.type == "CURRENT" then
+						AddOn.sourceTaxiNode = taxiNodePos
+					end
 
 					if shouldDisplay then
-						AddOn:DisplayTaxiNode(button, nodeType, posNode.x, posNode.y)
+						AddOn:DisplayTaxiNode(taxiButtons[i], nodeType, taxiNodePos.x, taxiNodePos.y)
 					end
 				end
 			end
-			-- only draw route lines at continent level
 			AddOn:DrawOneHopLines()
 		end
 	end
 end
 --------------------------------
 function AddOn:TaxiTakeNode(id)
+	local mapID = AddOn:GetPlayerContinentMapID()
+	local key = AddOn:GetTaxiLogKey(AddOn.sourceTaxiNode.node.position, AddOn.taxiNodePositions[id].node.position)
+	AddOn:SendMessage(AddOn.Message.TAXI_START, mapID, key)
 	TakeTaxiNode(id)
 end

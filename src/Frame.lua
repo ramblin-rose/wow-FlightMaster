@@ -9,3 +9,7 @@ function AddOn:InitFrame()
 	AddOn.frameRouteMap:SetFrameStrata(AddOn.frame:GetFrameStrata())
 	AddOn.frameRouteMap:SetFrameLevel(AddOn.frame:GetFrameLevel() - 10)
 end
+
+function AddOn:GetFrameDim()
+	return AddOn.frame:GetWidth(), AddOn.frame:GetHeight()
+end

@@ -46,15 +46,4 @@ end
 function AddOn:GetEnabled()
 	return AddOn.enabled
 end
---------------------------------
-function AddOn:onEnableAddOn()
-	TaxiFrame:Hide()
-	WorldMapFrame:Hide()
-	AddOn:RegisterEvent("TAXIMAP_OPENED", AddOn.OnTaxiMapOpened)
-end
---------------------------------
-function AddOn:onDisableAddOn()
-	TaxiFrame:Hide()
-	WorldMapFrame:Hide()
-	AddOn:UnregisterEvent("TAXIMAP_OPENED")
-end
+

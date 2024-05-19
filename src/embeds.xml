@@ -15,10 +15,11 @@
   <Include file="Utility.lua" />  
   <Include file="Config.lua" />
   <Include file="Frame.lua" />
-  <Include file="Map.lua" />
-  <Include file="Route.lua" />
-  <Include file="Taxi.lua" />  
-  <Include file="Message.lua" />
   <Include file="Hook.lua" />
+  <Include file="Map.lua" />
+  <Include file="Message.lua" />
+  <Include file="Route.lua" />
+  <Include file="Taxi.lua" />    
+  <Include file="TaxiLog.lua" />
   <Include file="TaxiNodeButtonTemplate.xml" />  
 </Ui>
