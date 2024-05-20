@@ -26,7 +26,7 @@ let DEST = path.join(
   packageJson.title.replace(/\s+/gm, "")
 );
 
-const MERCH_CONFIG = {
+const FLIGHT_MASTER_CONFIG = {
   watchers: [
     class {
       static get glob() {
@@ -162,14 +162,14 @@ const MERCH_CONFIG = {
 // default is to move changes to the wow addon folder for easy code/test iterations.
 export default () => {
   console.log(DEST);
-  MERCH_CONFIG.watchers.forEach((e) => {
+  FLIGHT_MASTER_CONFIG.watchers.forEach((e) => {
     watch(e.glob, e.opts, e.taskFn);
   });
 };
 /*
  build/archive/deploy
  */
-export const build = series(MERCH_CONFIG.watchers.map((p) => p.taskFn));
+export const build = series(FLIGHT_MASTER_CONFIG.watchers.map((p) => p.taskFn));
 
 export const distClean = (cb) => {
   const folder = path.join(process.env.TEMP, `${util.distro}`);
