@@ -1,5 +1,7 @@
 node_modules/
 dist/
 build/
+curse/
+temp/
 .vscode/settings.json
 
