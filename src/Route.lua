@@ -3,6 +3,7 @@ local AddOn = _G[select(1, ...)]
 function AddOn:InitRoute()
 	AddOn.routeLines = {}
 end
+--------------------------------
 function AddOn:GetRouteLine(lineIndex)
 	local routeLines = AddOn.routeLines
 	local line
@@ -25,13 +26,17 @@ end
 --------------------------------
 function AddOn:PerformRouteLineDraw(line, taxiNodeIndex, routeNodeIndex, frame)
 	local taxiNodePositions = AddOn.taxiNodePositions
-	local src, dst
-	---@diagnostic disable-next-line: redundant-parameter
-	src = taxiNodePositions[TaxiGetNodeSlot(taxiNodeIndex, routeNodeIndex, true)]
-	---@diagnostic disable-next-line: redundant-parameter
-	dst = taxiNodePositions[TaxiGetNodeSlot(taxiNodeIndex, routeNodeIndex, false)]
+	local src = taxiNodePositions[TaxiGetNodeSlot(taxiNodeIndex, routeNodeIndex, true)].position
+	local dst = taxiNodePositions[TaxiGetNodeSlot(taxiNodeIndex, routeNodeIndex, false)].position
+	local w, h = AddOn:GetFrameDim(frame)
+
 	if src and dst then
-		DrawLine(line, AddOn.frameRouteMap, src.x, src.y, dst.x, dst.y, 32, TAXIROUTE_LINEFACTOR, AddOn.VIEWPORT_ORIGIN)
+		local sx, sy, dx, dy
+		sx = src.x * w
+		sy = (1.0 - src.y) * h
+		dx = dst.x * w
+		dy = (1.0 - dst.y) * h
+		DrawLine(line, frame, sx, sy, dx, dy, 32, TAXIROUTE_LINEFACTOR)
 		line:Show()
 	end
 end
@@ -57,8 +62,8 @@ function AddOn:DrawOneHopLines()
 					end
 				elseif nodeType == "DISTANT" then
 					numSingleHops = numSingleHops + 1
-					local button = AddOn.taxiButtons[i]
-					button:Hide()
+					--local button = AddOn.taxiButtons[i]
+					--button:Hide()
 				end
 			end
 			for i = numLines + 1, #routeLines do

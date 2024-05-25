@@ -1,6 +1,6 @@
 local AddOn = _G[select(1, ...)]
 --------------------------------
-function AddOn:OnInitialize()	
+function AddOn:OnInitialize()
 	AddOn:InitConfig()
 	AddOn:InitFrame()
 	AddOn:InitHook()
@@ -9,7 +9,7 @@ function AddOn:OnInitialize()
 	AddOn:InitRoute()
 	AddOn:InitTaxi()
 	AddOn:InitTaxiLog()
-		
+
 	AddOn:SetEnabled(true)
 	AddOn:AddMessageHandler(AddOn.Message.ENABLE_ADDON, AddOn.onEnableAddOn)
 	AddOn:AddMessageHandler(AddOn.Message.DISABLE_ADDON, AddOn.onDisableAddOn)
@@ -19,7 +19,7 @@ end
 function AddOn:onEnableAddOn()
 	TaxiFrame:Hide()
 	WorldMapFrame:Hide()
-	AddOn:RegisterEvent("TAXIMAP_OPENED", AddOn.OnTaxiMapOpened)	
+	AddOn:RegisterEvent("TAXIMAP_OPENED", AddOn.OnTaxiMapOpened)
 end
 --------------------------------
 function AddOn:onDisableAddOn()
@@ -44,7 +44,6 @@ function AddOn:OnTaxiMapOpened(...)
 
 	ToggleWorldMap()
 	WorldMapFrame:SetMapID(AddOn:GetPlayerContinentMapID())
-	AddOn:UpdateTaxiMap()
 end
 --------------------------------
 function AddOn:OnHideWorldMapFrame()

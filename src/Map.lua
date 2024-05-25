@@ -1,6 +1,7 @@
 local AddOn = _G[select(1, ...)]
 --------------------------------
 function AddOn:InitMap() end
+--------------------------------
 function AddOn:GetNearestContinentID(mapID)
 	if mapID then
 		local mapInfo = C_Map.GetMapInfo(mapID)
@@ -14,16 +15,14 @@ function AddOn:GetNearestContinentID(mapID)
 	end
 end
 --------------------------------
+function AddOn:OnWorldMapMinMax()
+	AddOn:HideRouteLines()
+	AddOn:DrawOneHopLines()
+end
+--------------------------------
 function AddOn:GetPlayerContinentMapID()
 	local mapID = C_Map.GetBestMapForUnit("player")
 	return AddOn:GetNearestContinentID(mapID)
-end
---------------------------------
-function AddOn:GetViewportXY(x, y, width, height)
-	if AddOn.VIEWPORT_ORIGIN == "TOPLEFT" then
-		return x * width, y * -height
-	end
-	assert(false) -- unsupported viewport origin
 end
 --------------------------------
 function AddOn:GetPlayerMapPosition()

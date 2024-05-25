@@ -22,4 +22,5 @@
   <Include file="Taxi.lua" />    
   <Include file="TaxiLog.lua" />
   <Include file="TaxiNodeButtonTemplate.xml" />  
+   <Include file="FlightMasterPointPinTemplate.xml" />
 </Ui>

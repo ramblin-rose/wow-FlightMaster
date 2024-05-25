@@ -4,15 +4,18 @@ function AddOn:InitTaxi()
 	AddOn.taxiNodePositions = {}
 	AddOn.taxiButtons = {}
 	AddOn.factionGroup = UnitFactionGroup("player")
+	WorldMapFrame:AddDataProvider(CreateFromMixins(FlightMasterPointDataProviderMixin))
 end
 --------------------------------
-function AddOn:DisplayTaxiNode(button, nodeType, x, y)
-	button:ClearAllPoints()
-	button:SetNormalTexture(TaxiButtonTypes[nodeType].file)
-	button:SetPoint("CENTER", AddOn.frame, AddOn.VIEWPORT_ORIGIN, x, y)
-	button:SetNormalTexture(TaxiButtonTypes[nodeType].file)
-	button:GetHighlightTexture():SetAlpha(TaxiButtonTypes[nodeType].highlightBrightness)
-	button:Show()
+function AddOn:EnsureTaxiButtons(numNodes)
+	if numNodes > #AddOn.taxiButtons then
+		local button
+		for i = #AddOn.taxiButtons + 1, numNodes do
+			button = CreateFrame("Button", nil, AddOn.frame, "TaxiNodeButtonTemplate")
+			button:SetID(i)
+			table.insert(AddOn.taxiButtons, button)
+		end
+	end
 end
 --------------------------------
 function AddOn:HideTaxiNodeButtons()
@@ -24,7 +27,6 @@ end
 --------------------------------
 function AddOn:TaxiNodeOnButtonEnter(button)
 	local index = button:GetID()
-
 	local numNodes = NumTaxiNodes()
 	local numRoutes = GetNumRoutes(index)
 	local nodeType = TaxiNodeGetType(index)
@@ -81,7 +83,7 @@ function AddOn:TaxiNodeOnButtonLeave(button)
 	end
 end
 --------------------------------
-function AddOn:GetMapTaxiNodes(mapID)
+function AddOn:GetNamedMapTaxiNodes(mapID)
 	local nodes = C_TaxiMap.GetTaxiNodesForMap(mapID)
 	local result = {}
 	for i, e in ipairs(nodes) do
@@ -92,171 +94,31 @@ function AddOn:GetMapTaxiNodes(mapID)
 	return result
 end
 --------------------------------
-function AddOn:ShouldShowTaxiNode(taxiNodeInfo)
-	if taxiNodeInfo.faction == Enum.FlightPathFaction.Horde then
+function AddOn:ShouldShowTaxiNode(taxiNode)
+	if taxiNode.faction == Enum.FlightPathFaction.Horde then
 		return AddOn.factionGroup == "Horde"
 	end
 
-	if taxiNodeInfo.faction == Enum.FlightPathFaction.Alliance then
+	if taxiNode.faction == Enum.FlightPathFaction.Alliance then
 		return AddOn.factionGroup == "Alliance"
 	end
 
 	return true
 end
 --------------------------------
-function AddOn:EnsureTaxiNodes(taxiButtons, numNodes)
-	if numNodes > #taxiButtons then
-		local button
-		for i = #taxiButtons + 1, numNodes do
-			button = CreateFrame("Button", nil, AddOn.frame, "TaxiNodeButtonTemplate")
-			button:SetID(i)
-			table.insert(taxiButtons, button)
+function AddOn:GetSourceTaxiNodeIndex()
+	local numNodes = NumTaxiNodes()
+	for i = 1, numNodes do
+		if TaxiNodeGetType(i) == "CURRENT" then
+			return i
 		end
 	end
-end
---------------------------------
--- empirical values
-local nudgeNodes = {
-	[1414] = { -- Kalimdor
-		["41,60"] = { x = 4, y = 12 },
-		["44,46"] = { x = -5, y = 5 },
-		["45,47"] = { x = 6, y = -2 },
-		["47,40"] = { x = -5, y = 2 },
-		["48,43"] = { x = 2, y = -2 },
-		["49,81"] = { x = -6, y = 4 },
-		["50,81"] = { x = 6, y = -2 },
-	},
-	[113] = { -- Northrend
-		["52,33"] = { x = -2, y = 4 },
-		["52,34"] = { x = 0, y = -3 },
-		["65,45"] = { x = -3, y = 2 },
-		["67,47"] = { x = 3, y = 12 },
-	},
-	[1415] = { -- Eastern Kingdoms
-		["52,33"] = { x = -2, y = -4 }, -- Throndroril River, Eastern Plaguelands
-		["56,32"] = { x = -8, y = 0 }, -- Light's Shield Tower, Eastern Plaguelands
-		["57,30"] = { x = -8, y = 0 }, -- Eastwall Tower, Eastern Plaguelands
-		["55,35"] = { x = -12, y = 4 }, -- Crown Guard Tower, Eastern Plaguelands
-		["47,62"] = { x = 0, y = -16 }, -- Thorium Point, Searing Gorge
-		["53,77"] = { x = 6, y = 0 }, -- Bogpaddle, Swamp of Sorrows
-		["54,75"] = { x = 0, y = -26 }, -- Marshtide Watch, Swamp of Sorrows
-		["53,80"] = { x = 0, y = -12 }, -- Nethergarde Keep, Blasted Lands
-		["50,53"] = { x = 4, y = 0 }, -- Greenwarden's Grove, Wetlands
-		["51,53"] = { x = -16, y = -4 }, -- Whelgar's Retreat, Wetlands
-	},
-	[1955] = { -- Outlands
-	},
-	[203] = { -- Vashj'ir
-	},
-}
-
-local defaultNudge = { x = 0, y = 0 }
---------------------------------
-function AddOn:GetTaxiNodeNudgeKey(x, y)
-	return math.floor(x * 100) .. "," .. math.floor(y * 100)
-end
---------------------------------
-function AddOn:GetTaxiNodeNudge(mapID, mapTaxiNode)
-	local list = nudgeNodes[mapID]
-	local nudge = defaultNudge
-	local key
-	if list then
-		key = AddOn:GetTaxiNodeNudgeKey(mapTaxiNode.position.x, mapTaxiNode.position.y)
-		nudge = nudgeNodes[mapID][key] or nudge
-	end
-	return nudge, key
-end
---------------------------------
--- returns x, y, shouldDisplay
-function AddOn:FinalizeNodePosition(mapInfo, mapTaxiNode, button, width, height)
-	local shouldDisplay = true
-	local x, y = AddOn:GetViewportXY(mapTaxiNode.position.x, mapTaxiNode.position.y, width, height)
-	-- prevent dangling taxi nodes on the edge of zone maps
-	if mapInfo.mapType == 3 then
-		local w, h = button:GetWidth(), button:GetHeight()
-		if x < 0 or x > (width - w) then
-			shouldDisplay = false
-		elseif y > h or math.abs(y) > (height - h) then
-			shouldDisplay = false
-		end
-	end
-
-	-- soothe the irritation of overlapping mercurial boots. Serenity Now!
-	local nudge = AddOn:GetTaxiNodeNudge(mapInfo.mapID, mapTaxiNode)
-	x = x + nudge.x
-	y = y + nudge.y
-	return x, y, shouldDisplay
-end
---------------------------------
-function AddOn:UpdateTaxiMap()
-	local mapID = WorldMapFrame:GetMapID()
-	local mapInfo = C_Map.GetMapInfo(mapID)
-	local playerContinentMapID = AddOn:GetPlayerContinentMapID()
-	local taxiNodePositions = AddOn.taxiNodePositions
-	local taxiButtons = AddOn.taxiButtons
-
-	AddOn:HideRouteLines()
-	AddOn:HideTaxiNodeButtons()
-
-	AddOn.mapInfo = nil
-	AddOn.sourceTaxiNode = nil
-
-	wipe(taxiNodePositions)
-	-- mapInfo.mapType 2 (continent) must match player continent;
-	-- mapInfo.mayType 3 (zone) must be a zone in player continent;
-	-- ignore otherwise.
-	if
-		(mapInfo.mapType == 2 and mapID == playerContinentMapID)
-		or (mapInfo.mapType == 3 and (AddOn:GetNearestContinentID(mapID) == playerContinentMapID))
-	then
-		local numNodes = NumTaxiNodes()
-
-		AddOn.mapInfo = mapInfo
-		AddOn.frame:SetAllPoints()
-		AddOn.frameRouteMap:SetAllPoints()
-
-		AddOn:EnsureTaxiNodes(taxiButtons, numNodes)
-
-		local mapTaxiNodes = AddOn:GetMapTaxiNodes(mapID)
-
-		if mapTaxiNodes then
-			local nodeType, mapTaxiNode
-			local taxiNodePos
-			local shouldDisplay
-			local width, height = AddOn:GetFrameDim()
-
-			for i = 1, numNodes do
-				mapTaxiNode = mapTaxiNodes[TaxiNodeName(i)]
-				nodeType = TaxiNodeGetType(i)
-				if mapTaxiNode then
-					taxiNodePositions[i] = {
-						type = nodeType,
-						node = mapTaxiNode,
-						-- x, y are calculated below and represent adjusted map coordinates
-					}
-
-					taxiNodePos = taxiNodePositions[i]
-
-					taxiNodePos.x, taxiNodePos.y, shouldDisplay =
-						AddOn:FinalizeNodePosition(mapInfo, mapTaxiNode, taxiButtons[i], width, height)
-
-					if taxiNodePos.type == "CURRENT" then
-						AddOn.sourceTaxiNode = taxiNodePos
-					end
-
-					if shouldDisplay then
-						AddOn:DisplayTaxiNode(taxiButtons[i], nodeType, taxiNodePos.x, taxiNodePos.y)
-					end
-				end
-			end
-			AddOn:DrawOneHopLines()
-		end
-	end
+	assert(false)
 end
 --------------------------------
 function AddOn:TaxiTakeNode(id)
-	local mapID = AddOn:GetPlayerContinentMapID()
-	local key = AddOn:GetTaxiLogKey(AddOn.sourceTaxiNode.node.position, AddOn.taxiNodePositions[id].node.position)
-	AddOn:SendMessage(AddOn.Message.TAXI_START, mapID, key)
+	local source, dest = AddOn.taxiNodePositions[AddOn:GetSourceTaxiNodeIndex()], AddOn.taxiNodePositions[id]
+	local key = AddOn:GetTaxiLogKey(source.position, dest.position)
+	AddOn:SendMessage(AddOn.Message.TAXI_START, AddOn:GetPlayerContinentMapID(), key)
 	TakeTaxiNode(id)
 end
