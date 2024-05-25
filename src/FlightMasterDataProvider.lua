@@ -70,9 +70,16 @@ function FlightMasterPointPinMixin:ApplyCurrentPosition()
 	local pinInfo = self.fm_pinInfo
 	if pinInfo then
 		local point, relativeTo, relativePoint, xOfs, yOfs = self:GetPoint()
-		pinInfo.button:ClearAllPoints()
-		pinInfo.button:SetPoint(point, relativeTo, relativePoint, xOfs, yOfs)
-		pinInfo.button:Show()
+		local pos = AddOn.taxiNodePositions[pinInfo.index].position
+		local width = AddOn:GetFrameDim(AddOn.frameRouteMap)
+		local x = pos.x * width
+		if x < 0 or x > width then
+			self:Hide()
+		else
+			pinInfo.button:ClearAllPoints()
+			pinInfo.button:SetPoint(point, relativeTo, relativePoint, xOfs, yOfs)
+			pinInfo.button:Show()
+		end
 	end
 end
 --------------------------------
