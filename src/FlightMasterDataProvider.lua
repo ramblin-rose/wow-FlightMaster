@@ -45,9 +45,6 @@ function FlightMasterPointDataProviderMixin:RefreshAllData(fromOnShow)
 end
 --------------------------------
 function FlightMasterPointDataProviderMixin:ShouldShowTaxiNode(nodeType, factionGroup, taxiNode)
-	if nodeType == "DISTANT" then
-		return false
-	end
 	if taxiNode.faction == Enum.FlightPathFaction.Horde then
 		return factionGroup == "Horde"
 	end
