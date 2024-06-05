@@ -5,6 +5,7 @@
   <Include file="libs\AceConsole-3.0\AceConsole-3.0.xml"/>
   <Include file="libs\AceEvent-3.0\AceEvent-3.0.xml"/> 
   <Include file="libs\AceHook-3.0\AceHook-3.0.xml"/> 
+  <Include file="libs\AceTimer-3.0\AceTimer-3.0.xml"/> 
   <Include file="libs\AceDB-3.0\AceDB-3.0.xml"/>
   <Include file="libs\AceGUI-3.0\AceGUI-3.0.xml"/>
   <Include file="libs\AceConfig-3.0\AceConfig-3.0.xml"/>
@@ -18,9 +19,8 @@
   <Include file="Hook.lua" />
   <Include file="Map.lua" />
   <Include file="Message.lua" />
-  <Include file="Route.lua" />
-  <Include file="Taxi.lua" />    
+  <Include file="Route.lua" />  
   <Include file="TaxiLog.lua" />
   <Include file="TaxiNodeButtonTemplate.xml" />  
-   <Include file="FlightMasterPointPinTemplate.xml" />
+  <Include file="FlightMasterPointPinTemplate.xml" />  
 </Ui>

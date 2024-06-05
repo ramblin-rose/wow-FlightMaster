@@ -1,93 +1,179 @@
 local AddOn = _G[select(1, ...)]
 --------------------------------
 FlightMasterPointDataProviderMixin = CreateFromMixins(MapCanvasDataProviderMixin)
+function AddOn:InitFlightMasterDataProvider()
+	AddOn.factionGroup = UnitFactionGroup("player")
+	AddOn.taxiNodePositions = {}
+	AddOn.showUnknownPoints = false
+	AddOn.dataProvider = CreateFromMixins(FlightMasterPointDataProviderMixin)
+	WorldMapFrame:AddDataProvider(AddOn.dataProvider)
+end
 
+--------------------------------
+function FlightMasterPointDataProviderMixin:OnAdded(mapCanvas)
+	MapCanvasDataProviderMixin.OnAdded(self, mapCanvas)
+	AddOn.lineCanvas = AddOn.frameRouteMap
+end
+function MapCanvasDataProviderMixin:OnCanvasScaleChanged()
+	self:RefreshAllData()
+end
+
+function MapCanvasDataProviderMixin:OnCanvasSizeChanged()
+	self:RefreshAllData()
+end
+--------------------------------
 function FlightMasterPointDataProviderMixin:RemoveAllData()
 	self:GetMap():RemoveAllPinsByTemplate("FlightMasterPointPinTemplate")
 	AddOn:HideRouteLines()
-	AddOn:HideTaxiNodeButtons()
+	wipe(AddOn.taxiNodePositions)
+	AddOn.currentTaxiNode = nil
+end
+--------------------------------
+function FlightMasterPointDataProviderMixin:GetNamedMapTaxiNodes(mapID)
+	local mapTaxiNodes = C_TaxiMap.GetTaxiNodesForMap(mapID)
+	local taxiNodeNameMap = {}
+
+	for _, e in ipairs(mapTaxiNodes) do
+		taxiNodeNameMap[e.name] = e
+	end
+
+	return taxiNodeNameMap, #mapTaxiNodes
 end
 --------------------------------
 function FlightMasterPointDataProviderMixin:RefreshAllData(fromOnShow)
 	self:RemoveAllData()
-	AddOn:HideRouteLines()
-	AddOn:HideTaxiNodeButtons()
-	AddOn.frame:SetAllPoints()
-	AddOn.frameRouteMap:SetAllPoints()
-	AddOn.mapInfo = C_Map.GetMapInfo(self:GetMap():GetMapID())
+	if AddOn.flightMasterContext then
+		local playerContinentMapID = AddOn:GetPlayerContinentMapID()
 
-	local numNodes = NumTaxiNodes()
-	AddOn:EnsureTaxiButtons(numNodes)
+		AddOn.mapInfo = C_Map.GetMapInfo(self:GetMap():GetMapID())
+		AddOn.frameRouteMap:SetAllPoints()
+		-- mapInfo.mapType 2 (continent) must match player continent;
+		-- mapInfo.mayType 3 (zone) must be a zone in player continent;
+		-- ignore otherwise.
+		local isZoneMap = AddOn.mapInfo.mapType == 3
+			and (AddOn:GetNearestContinentID(AddOn.mapInfo.mapID) == playerContinentMapID)
+		local isContinentMap = AddOn.mapInfo.mapType == 2 and AddOn.mapInfo.mapID == playerContinentMapID
+		if isZoneMap or isContinentMap then
+			local numNodes = NumTaxiNodes()
+			local name, pin, taxiNode, nodeType
+			local taxiNodeNameMap = self:GetNamedMapTaxiNodes(self:GetMap():GetMapID())
 
-	local taxiNodes = AddOn:GetNamedMapTaxiNodes(self:GetMap():GetMapID())
-	local name, taxiNode, nodeType, pin
-
-	wipe(AddOn.taxiNodePositions)
-
-	for i = 1, numNodes do
-		-- GetNamedMapTaxiNodes s *all* taxi nodes on the map; filter for the nodes reflected by the Taxi methods.
-		name = TaxiNodeName(i)
-		taxiNode = taxiNodes[name]
-		if taxiNode then
-			nodeType = TaxiNodeGetType(i)
-			if self:ShouldShowTaxiNode(nodeType, AddOn.factionGroup, taxiNode) then
-				pin = self:GetMap():AcquirePin("FlightMasterPointPinTemplate", taxiNode)
-				pin.fm_pinInfo = {
-					index = i,
-					pin = pin,
-					nodeType = TaxiNodeGetType(i),
-					button = AddOn.taxiButtons[i],
-				}
-				AddOn.taxiNodePositions[i] = taxiNode
+			for i = 1, numNodes do
+				name = TaxiNodeName(i)
+				nodeType = TaxiNodeGetType(i)
+				taxiNode = taxiNodeNameMap[name]
+				if taxiNode and (nodeType ~= "DISTANT" or (nodeType == "DISTANT" and AddOn.showUnknownPoints)) then
+					pin = self:GetMap():AcquirePin("FlightMasterPointPinTemplate", taxiNode)
+					pin.fm_pinInfo = {
+						index = i,
+						taxiNode = taxiNode,
+						nodeType = TaxiNodeGetType(i),
+						name = taxiNode.name,
+					}
+					pin:UpdateTexture()
+					if pin.fm_pinInfo.nodeType == "CURRENT" then
+						AddOn.originTaxiNode = taxiNode
+					end
+					AddOn.taxiNodePositions[i] = taxiNode
+				end
+			end
+			if AddOn.mapInfo.mapType == 2 then
+				AddOn:DrawOneHopLines()
 			end
 		end
 	end
 end
 --------------------------------
-function FlightMasterPointDataProviderMixin:ShouldShowTaxiNode(nodeType, factionGroup, taxiNode)
-	if taxiNode.faction == Enum.FlightPathFaction.Horde then
-		return factionGroup == "Horde"
+function FlightMasterPointDataProviderMixin:ShouldShowTaxiNode(mapTaxiNode)
+	if mapTaxiNode.faction == Enum.FlightPathFaction.Horde then
+		return AddOn.factionGroup == "Horde"
 	end
 
-	if taxiNode.faction == Enum.FlightPathFaction.Alliance then
-		return factionGroup == "Alliance"
+	if mapTaxiNode.faction == Enum.FlightPathFaction.Alliance then
+		return AddOn.factionGroup == "Alliance"
 	end
 
 	return true
 end
 --------------------------------
 --[[ Pin ]]
--- this is a positioning proxy for taxi node buttons; never display this pin.
-FlightMasterPointPinMixin = BaseMapPoiPinMixin:CreateSubPin("PIN_FRAME_LEVEL_AREA_POI")
+-- Until it is determined how to get along with Questie POI's we shall be rude with insisting upon topmost
+FlightMasterPointPinMixin = BaseMapPoiPinMixin:CreateSubPin("PIN_FRAME_LEVEL_TOPMOST")
+----------------------------------
+function FlightMasterPointPinMixin:SetTexture(poiInfo)
+	self:SetSize(16, 16)
 
-function FlightMasterPointPinMixin:ApplyCurrentPosition()
-	self:GetMap():ApplyPinPosition(self, self.normalizedX, self.normalizedY, self.insetIndex)
-	self:Hide()
+	if self.Texture then
+		self.Texture:SetWidth(12)
+		self.Texture:SetHeight(12)
+	end
 
-	local pinInfo = self.fm_pinInfo
-	if pinInfo then
-		local point, relativeTo, relativePoint, xOfs, yOfs = self:GetPoint()
-		local pos = AddOn.taxiNodePositions[pinInfo.index].position
-		local width = AddOn:GetFrameDim(AddOn.frameRouteMap)
-		local x = pos.x * width
-		if x < 0 or x > width then
-			self:Hide()
-		else
-			pinInfo.button:ClearAllPoints()
-			pinInfo.button:SetPoint(point, relativeTo, relativePoint, xOfs, yOfs)
-			pinInfo.button:Show()
-		end
+	if self.HighlightTexture then
+		self.HighlightTexture:SetWidth(12)
+		self.HighlightTexture:SetHeight(12)
 	end
 end
 --------------------------------
-function FlightMasterPointPinMixin:SetTexture(poiInfo)
-	local pinInfo = self.fm_pinInfo
-	if pinInfo then
-		pinInfo.button:SetWidth(12)
-		pinInfo.button:SetHeight(12)
-		local texInfo = TaxiButtonTypes[pinInfo.nodeType]
-		if texInfo then
-			pinInfo.button:SetNormalTexture(texInfo.file)
-		end
+function FlightMasterPointPinMixin:UpdateTexture()
+	if self.fm_pinInfo then
+		local texInfo = TaxiButtonTypes[self.fm_pinInfo.nodeType]
+		self.Texture:SetTexture(texInfo.file)
+		self.HighlightTexture:SetTexture("Interface\\TaxiFrame\\UI-Taxi-Icon-Yellow")
+	else
+		self.Texture:SetTexture(0, 0, 0, 0)
+		self.HighlightTexture:SetTexture(0, 0, 0, 0)
 	end
+end
+--------------------------------
+function FlightMasterPointPinMixin:OnMouseEnter()
+	local index = self.fm_pinInfo.index
+	local numRoutes = GetNumRoutes(index)
+	local nodeType = TaxiNodeGetType(index)
+	local isZone = AddOn.mapInfo and AddOn.mapInfo.mapType ~= 2
+	local line
+
+	AddOn:HideRouteLines()
+
+	GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+	GameTooltip:AddLine(TaxiNodeName(index), nil, nil, nil, true)
+
+	if nodeType == "REACHABLE" then
+		SetTooltipMoney(GameTooltip, TaxiNodeCost(index))
+		if not isZone then
+			for i = 1, numRoutes do
+				line = AddOn:GetRouteLine(i)
+				if i <= numRoutes then
+					AddOn:PerformRouteLineDraw(line, index, i, AddOn.lineCanvas)
+					line:Show()
+				else
+					line:Hide()
+				end
+			end
+		end
+	elseif nodeType == "UNREACHABLE" then
+		-- tbd
+	elseif nodeType == "CURRENT" and not isZone then
+		GameTooltip:AddLine(TAXINODEYOUAREHERE, 1.0, 1.0, 1.0, true)
+		AddOn:DrawOneHopLines()
+	end
+
+	GameTooltip:Show()
+end
+--------------------------------
+function FlightMasterPointPinMixin:OnMouseLeave()
+	GameTooltip:Hide()
+end
+--------------------------------
+function FlightMasterPointPinMixin:IsMouseClickEnabled()
+	return true
+end
+--------------------------------
+function FlightMasterPointPinMixin:OnMouseDown()
+	local index = self.fm_pinInfo.index
+	-- preliminary code for taxi logging feature.
+	local sourceNode = AddOn.originTaxiNode
+	local destNode = self.fm_pinInfo.taxiNode
+	local key = AddOn:GetTaxiLogKey(sourceNode.position, destNode.position)
+	AddOn:SendMessage(AddOn.Message.TAXI_START, AddOn:GetPlayerContinentMapID(), key)
+	TakeTaxiNode(index)
 end

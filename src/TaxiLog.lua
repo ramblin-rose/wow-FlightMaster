@@ -1,14 +1,10 @@
+-- This feature is in an intermediary state and is not ready for beta
 --The inverse of travel time from point A to point B is not always equal
 local AddOn = _G[select(1, ...)]
 --------------------------------
 local taxiRequestEarlyLanding = false
 --------------------------------
 function AddOn:InitTaxiLog()
-	if not AddOn.db then
-		AddOn.db = LibStub("AceDB-3.0"):New(AddOn.name .. "DB", {
-			global = {},
-		})
-	end
 	AddOn.db.global.taxiLog = AddOn.db.global.taxiLog or {}
 
 	AddOn:AddMessageHandler(AddOn.Message.TAXI_START, function(...)
@@ -26,7 +22,7 @@ function AddOn:onTaxiStart(mapID, key)
 	taxiRequestEarlyLanding = false
 
 	AddOn:RegisterEvent("PLAYER_CONTROL_GAINED", function()
-		AddOn:onTaxiEnd(mapID, key, startTime)
+		-- AddOn:onTaxiEnd(mapID, key, startTime)
 	end)
 end
 --------------------------------
@@ -34,7 +30,7 @@ function AddOn:onTaxiEnd(mapID, key, startTime)
 	AddOn:UnregisterEvent("PLAYER_CONTROL_GAINED")
 
 	if taxiRequestEarlyLanding == false then
-		AddOn:LogTravelTime(mapID, key, GetTime() - startTime)
+		-- AddOn:LogTravelTime(mapID, key, GetTime() - startTime)
 	end
 end
 --------------------------------

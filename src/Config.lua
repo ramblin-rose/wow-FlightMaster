@@ -2,9 +2,6 @@ local AddOn = _G[select(1, ...)]
 local L = AddOn.L
 
 function AddOn:InitConfig()
-
-
-	
 	local options = {
 		name = AddOn.String.CommandName,
 		handler = self,
@@ -37,6 +34,10 @@ function AddOn:InitConfig()
 	AddOn.db = LibStub("AceDB-3.0"):New(AddOn.name .. "DB", {
 		global = {},
 	})
+	-- correct the lack of serialization versioning
+	if AddOn.db.global.version == nil then		
+		AddOn.db.global.version = 1
+	end
 end
 --------------------------------
 function AddOn:SetEnabled(enable)
@@ -46,4 +47,3 @@ end
 function AddOn:GetEnabled()
 	return AddOn.enabled
 end
-

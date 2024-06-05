@@ -7,12 +7,15 @@ function AddOn:OnInitialize()
 	AddOn:InitMap()
 	AddOn:InitMessage()
 	AddOn:InitRoute()
-	AddOn:InitTaxi()
+	AddOn:InitFlightMasterDataProvider()
 	AddOn:InitTaxiLog()
 
 	AddOn:SetEnabled(true)
 	AddOn:AddMessageHandler(AddOn.Message.ENABLE_ADDON, AddOn.onEnableAddOn)
 	AddOn:AddMessageHandler(AddOn.Message.DISABLE_ADDON, AddOn.onDisableAddOn)
+
+	AddOn.Timer = LibStub("AceTimer-3.0")
+
 	AddOn:SendMessage(AddOn.Message.ENABLE_ADDON)
 end
 --------------------------------
@@ -29,14 +32,13 @@ function AddOn:onDisableAddOn()
 end
 --------------------------------
 function AddOn:OnHideTaxiFrame(...)
-	-- Do nothing stub. Deferring this event until the WorldMapFrame closes maintains the flight master context (taxi nodes)
+	-- Do nothing stub. Deferring this event until the WorldMapFrame closes maintains the flight master context
 	-- Once the WorldMapFrame is closed the TaxiFrame event is invoked and this hook removed.
 end
 --------------------------------
 function AddOn:OnTaxiMapOpened(...)
-	AddOn.flightMasterName = UnitName("target")
-	-- hooking the OnHide method allows the context - i.e. taxi nodes - of the flight master to remain whilst player interacts with WorldMapFrame
-	-- when WorldMapFrame is closed this context is released
+	-- grab flight master context
+	AddOn.flightMasterContext = UnitName("target")
 	local hook = AddOn.hooks[TaxiFrame]
 	if not hook or hook.OnHide == nil then
 		AddOn:RawHookScript(TaxiFrame, "OnHide", "OnHideTaxiFrame")
@@ -44,17 +46,42 @@ function AddOn:OnTaxiMapOpened(...)
 
 	ToggleWorldMap()
 	WorldMapFrame:SetMapID(AddOn:GetPlayerContinentMapID())
+	AddOn:EnableDataProviderRefresh(true)
 end
 --------------------------------
 function AddOn:OnHideWorldMapFrame()
-	GameTooltip:Hide() -- cover edge case when TaxiNodeOnButtonLeave isn't fired when selecting a destination
-	if AddOn.flightMasterName then
-		AddOn:HideTaxiNodeButtons()
+	GameTooltip:Hide()
+	AddOn:EnableDataProviderRefresh(false)
+	-- release flight master context
+	if AddOn.flightMasterContext then
 		if AddOn.hooks[TaxiFrame] and AddOn.hooks[TaxiFrame].OnHide then
 			AddOn.hooks[TaxiFrame]:OnHide(TaxiFrame)
 			AddOn:Unhook(TaxiFrame, "OnHide")
 		end
-		AddOn.flightMasterName = nil
+		AddOn.flightMasterContext = nil
 	end
 end
 --------------------------------
+-- tbd deeper understanding of data provider framework may negate this workaround
+-- workaround an issue where some taxi nodes are not rendered properly
+function AddOn:EnableDataProviderRefresh(enable)
+	if not enable then
+		if AddOn.timerId then
+			AddOn.Timer:CancelTimer(AddOn.timerId)
+			AddOn.timerId = nil
+		end
+	elseif AddOn.timerId == nil then
+		-- pump the data provider
+		local timerCount = 10
+		local timeOutMs = 0.25
+		AddOn.timerId = AddOn.Timer:ScheduleRepeatingTimer(function()
+			timerCount = timerCount - 1
+			if timerCount > 0 then
+				AddOn.dataProvider:RefreshAllData()
+			else
+				AddOn.Timer:CancelTimer(AddOn.timerId)
+				AddOn.timerId = nil
+			end
+		end, timeOutMs)
+	end
+end

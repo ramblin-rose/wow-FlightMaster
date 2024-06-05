@@ -16,8 +16,11 @@ function AddOn:GetNearestContinentID(mapID)
 end
 --------------------------------
 function AddOn:OnWorldMapMinMax()
-	AddOn:HideRouteLines()
-	AddOn:DrawOneHopLines()
+	--  if AddOn.dataProvider then
+	--  	AddOn.dataProvider:RefreshAllData()
+	--  end
+	--	AddOn:HideRouteLines()
+	--AddOn:DrawOneHopLines()
 end
 --------------------------------
 function AddOn:GetPlayerContinentMapID()
