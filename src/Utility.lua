@@ -83,7 +83,7 @@ local function copy(obj, seen)
 	end
 	return res
 end
-
+--------------------------------
 local function printTable(table, color)
 	color = color or ""
 	print(color .. tostring(table) .. "\n")

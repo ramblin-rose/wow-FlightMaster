@@ -1,22 +1,23 @@
 local AddOn = _G[select(1, ...)]
 --------------------------------
+
 function AddOn:OnInitialize()
-	AddOn:InitConfig()
-	AddOn:InitFrame()
-	AddOn:InitHook()
-	AddOn:InitMap()
-	AddOn:InitMessage()
-	AddOn:InitRoute()
-	AddOn:InitFlightMasterDataProvider()
-	AddOn:InitTaxiLog()
-
-	AddOn:SetEnabled(true)
-	AddOn:AddMessageHandler(AddOn.Message.ENABLE_ADDON, AddOn.onEnableAddOn)
-	AddOn:AddMessageHandler(AddOn.Message.DISABLE_ADDON, AddOn.onDisableAddOn)
-
 	AddOn.Timer = LibStub("AceTimer-3.0")
-
-	AddOn:SendMessage(AddOn.Message.ENABLE_ADDON)
+	AddOn:RegisterEvent("PLAYER_ENTERING_WORLD", function()
+		AddOn:UnregisterEvent("PLAYER_ENTERING_WORLD")
+		AddOn:InitConfig()
+		AddOn:InitFrame()
+		AddOn:InitHook()
+		AddOn:InitMap()
+		AddOn:InitMessage()
+		AddOn:InitRoute()
+		AddOn:InitFlightMasterDataProvider()
+		AddOn:InitTaxiLog()
+		AddOn:SetEnabled(true)
+		AddOn:AddMessageHandler(AddOn.Message.ENABLE_ADDON, AddOn.onEnableAddOn)
+		AddOn:AddMessageHandler(AddOn.Message.DISABLE_ADDON, AddOn.onDisableAddOn)
+		AddOn:SendMessage(AddOn.Message.ENABLE_ADDON)
+	end)
 end
 --------------------------------
 function AddOn:onEnableAddOn()
@@ -63,7 +64,7 @@ function AddOn:OnHideWorldMapFrame()
 end
 --------------------------------
 -- tbd deeper understanding of data provider framework may negate this workaround
--- workaround an issue where some taxi nodes are not rendered properly
+-- for an issue where some taxi nodes are not rendered properly
 function AddOn:EnableDataProviderRefresh(enable)
 	if not enable then
 		if AddOn.timerId then

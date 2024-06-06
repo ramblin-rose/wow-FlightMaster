@@ -8,18 +8,10 @@ function AddOn:InitFlightMasterDataProvider()
 	AddOn.dataProvider = CreateFromMixins(FlightMasterPointDataProviderMixin)
 	WorldMapFrame:AddDataProvider(AddOn.dataProvider)
 end
-
 --------------------------------
 function FlightMasterPointDataProviderMixin:OnAdded(mapCanvas)
 	MapCanvasDataProviderMixin.OnAdded(self, mapCanvas)
 	AddOn.lineCanvas = AddOn.frameRouteMap
-end
-function MapCanvasDataProviderMixin:OnCanvasScaleChanged()
-	self:RefreshAllData()
-end
-
-function MapCanvasDataProviderMixin:OnCanvasSizeChanged()
-	self:RefreshAllData()
 end
 --------------------------------
 function FlightMasterPointDataProviderMixin:RemoveAllData()
@@ -57,12 +49,13 @@ function FlightMasterPointDataProviderMixin:RefreshAllData(fromOnShow)
 			local numNodes = NumTaxiNodes()
 			local name, pin, taxiNode, nodeType
 			local taxiNodeNameMap = self:GetNamedMapTaxiNodes(self:GetMap():GetMapID())
-
+			local shouldShowUnknown = AddOn:GetShowUnknownFlightMasters()
 			for i = 1, numNodes do
 				name = TaxiNodeName(i)
 				nodeType = TaxiNodeGetType(i)
 				taxiNode = taxiNodeNameMap[name]
-				if taxiNode and (nodeType ~= "DISTANT" or (nodeType == "DISTANT" and AddOn.showUnknownPoints)) then
+
+				if taxiNode and (nodeType ~= "DISTANT" or (nodeType == "DISTANT" and shouldShowUnknown)) then
 					pin = self:GetMap():AcquirePin("FlightMasterPointPinTemplate", taxiNode)
 					pin.fm_pinInfo = {
 						index = i,
@@ -70,7 +63,10 @@ function FlightMasterPointDataProviderMixin:RefreshAllData(fromOnShow)
 						nodeType = TaxiNodeGetType(i),
 						name = taxiNode.name,
 					}
-					pin:UpdateTexture()
+					
+					-- intentionally updating texture outside of SetTexture
+					pin:UpdateTexture() 
+
 					if pin.fm_pinInfo.nodeType == "CURRENT" then
 						AddOn.originTaxiNode = taxiNode
 					end
@@ -101,21 +97,22 @@ end
 FlightMasterPointPinMixin = BaseMapPoiPinMixin:CreateSubPin("PIN_FRAME_LEVEL_TOPMOST")
 ----------------------------------
 function FlightMasterPointPinMixin:SetTexture(poiInfo)
-	self:SetSize(16, 16)
+	local size = AddOn.db.global.poiPinDimension
+
+	self:SetSize(size, size)
 
 	if self.Texture then
-		self.Texture:SetWidth(12)
-		self.Texture:SetHeight(12)
+		self.Texture:SetSize(size, size)
 	end
 
 	if self.HighlightTexture then
-		self.HighlightTexture:SetWidth(12)
-		self.HighlightTexture:SetHeight(12)
+		self.HighlightTexture:SetSize(size, size)
 	end
 end
 --------------------------------
 function FlightMasterPointPinMixin:UpdateTexture()
 	if self.fm_pinInfo then
+		-- use Blizz taxi assets where we can
 		local texInfo = TaxiButtonTypes[self.fm_pinInfo.nodeType]
 		self.Texture:SetTexture(texInfo.file)
 		self.HighlightTexture:SetTexture("Interface\\TaxiFrame\\UI-Taxi-Icon-Yellow")
@@ -139,17 +136,17 @@ function FlightMasterPointPinMixin:OnMouseEnter()
 
 	if nodeType == "REACHABLE" then
 		SetTooltipMoney(GameTooltip, TaxiNodeCost(index))
-		if not isZone then
-			for i = 1, numRoutes do
-				line = AddOn:GetRouteLine(i)
-				if i <= numRoutes then
-					AddOn:PerformRouteLineDraw(line, index, i, AddOn.lineCanvas)
-					line:Show()
-				else
-					line:Hide()
-				end
+		for i = 1, numRoutes do
+			line = AddOn:GetRouteLine(i)
+			if i <= numRoutes then
+				AddOn:PerformRouteLineDraw(line, index, i, AddOn.lineCanvas)
+				line:Show()
+			else
+				line:Hide()
 			end
 		end
+	elseif nodeType == "DISTANT" then
+		GameTooltip:AddLine(ERR_TAXINOPATHS, 250, 250, 250, true)
 	elseif nodeType == "UNREACHABLE" then
 		-- tbd
 	elseif nodeType == "CURRENT" and not isZone then

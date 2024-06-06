@@ -26,7 +26,6 @@ end
 --------------------------------
 function AddOn:PerformRouteLineDraw(line, taxiNodeIndex, routeNodeIndex, frame)
 	local taxiNodePositions = AddOn.taxiNodePositions
-
 	local src = taxiNodePositions[TaxiGetNodeSlot(taxiNodeIndex, routeNodeIndex, true)]
 	local dst = taxiNodePositions[TaxiGetNodeSlot(taxiNodeIndex, routeNodeIndex, false)]
 
@@ -42,13 +41,6 @@ function AddOn:PerformRouteLineDraw(line, taxiNodeIndex, routeNodeIndex, frame)
 			dy = (1.0 - dst.y) * h
 			DrawLine(line, frame, sx, sy, dx, dy, 32, TAXIROUTE_LINEFACTOR)
 			line:Show()
-		end
-	else
-		if not dst then
-			AddOn:Print("dst not found (route line)")
-		end
-		if not src then
-			AddOn:Print("src not found (route line)")
 		end
 	end
 end
