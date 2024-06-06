@@ -26,54 +26,52 @@ end
 --------------------------------
 function AddOn:PerformRouteLineDraw(line, taxiNodeIndex, routeNodeIndex, frame)
 	local taxiNodePositions = AddOn.taxiNodePositions
-	local src = taxiNodePositions[TaxiGetNodeSlot(taxiNodeIndex, routeNodeIndex, true)].position
-	local dst = taxiNodePositions[TaxiGetNodeSlot(taxiNodeIndex, routeNodeIndex, false)].position
-	local w, h = AddOn:GetFrameDim(frame)
+	local src = taxiNodePositions[TaxiGetNodeSlot(taxiNodeIndex, routeNodeIndex, true)]
+	local dst = taxiNodePositions[TaxiGetNodeSlot(taxiNodeIndex, routeNodeIndex, false)]
 
 	if src and dst then
-		local sx, sy, dx, dy
-		sx = src.x * w
-		sy = (1.0 - src.y) * h
-		dx = dst.x * w
-		dy = (1.0 - dst.y) * h
-		DrawLine(line, frame, sx, sy, dx, dy, 32, TAXIROUTE_LINEFACTOR)
-		line:Show()
+		local w, h = AddOn:GetFrameDim(frame)
+		src = src.position
+		dst = dst.position
+		if src and dst then
+			local sx, sy, dx, dy
+			sx = src.x * w
+			sy = (1.0 - src.y) * h
+			dx = dst.x * w
+			dy = (1.0 - dst.y) * h
+			DrawLine(line, frame, sx, sy, dx, dy, 32, TAXIROUTE_LINEFACTOR)
+			line:Show()
+		end
 	end
 end
 --------------------------------
 function AddOn:DrawOneHopLines()
-	if AddOn.mapInfo and AddOn.mapInfo.mapType == 2 then
-		local numNodes = NumTaxiNodes()
-		if numNodes > 0 then
-			local numLines = 0
-			local numSingleHops = 0
-			local routeLines = AddOn.routeLines
-			local nodeType, line
+	local numNodes = NumTaxiNodes()
+	if numNodes > 0 then
+		local numLines = 0
+		local numSingleHops = 0
+		local routeLines = AddOn.routeLines
+		local nodeType, line
 
-			for i = 1, numNodes do
-				nodeType = TaxiNodeGetType(i)
-				---@diagnostic disable-next-line: redundant-parameter
-				if (nodeType == "REACHABLE") and TaxiIsDirectFlight(i) then
-					numSingleHops = numSingleHops + 1
-					numLines = numLines + 1
-					line = AddOn:GetRouteLine(numLines)
-					if line then
-						AddOn:PerformRouteLineDraw(line, i, 1, AddOn.frameRouteMap)
-					end
-				elseif nodeType == "DISTANT" then
-					numSingleHops = numSingleHops + 1
-					--local button = AddOn.taxiButtons[i]
-					--button:Hide()
+		for i = 1, numNodes do
+			nodeType = TaxiNodeGetType(i)
+			---@diagnostic disable-next-line: redundant-parameter
+			if (nodeType == "REACHABLE") and TaxiIsDirectFlight(i) then
+				numSingleHops = numSingleHops + 1
+				numLines = numLines + 1
+				line = AddOn:GetRouteLine(numLines)
+				if line then
+					AddOn:PerformRouteLineDraw(line, i, 1, AddOn.frameRouteMap)
 				end
 			end
-			for i = numLines + 1, #routeLines do
-				line = AddOn:GetRouteLine(i)
-				line:Hide()
-			end
+		end
+		for i = numLines + 1, #routeLines do
+			line = AddOn:GetRouteLine(i)
+			line:Hide()
+		end
 
-			if numSingleHops == 0 then
-				UIErrorsFrame:AddMessage(ERR_TAXINOPATHS, 1.0, 0.1, 0.1, 1.0)
-			end
+		if numSingleHops == 0 then
+			UIErrorsFrame:AddMessage(ERR_TAXINOPATHS, 1.0, 0.1, 0.1, 1.0)
 		end
 	end
 end

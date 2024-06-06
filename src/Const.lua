@@ -10,4 +10,5 @@ AddOn.Message = {
 AddOn.String = {
 	CommandName = AddOn.L.addOnSlashCmd,
 	Title = select(2, GetAddOnInfo(AddOn:GetName())),
+	SemVer = GetAddOnMetadata(AddOn:GetName(), "Version"),
 }

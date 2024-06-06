@@ -15,11 +15,6 @@ function AddOn:GetNearestContinentID(mapID)
 	end
 end
 --------------------------------
-function AddOn:OnWorldMapMinMax()
-	AddOn:HideRouteLines()
-	AddOn:DrawOneHopLines()
-end
---------------------------------
 function AddOn:GetPlayerContinentMapID()
 	local mapID = C_Map.GetBestMapForUnit("player")
 	return AddOn:GetNearestContinentID(mapID)
