@@ -7,6 +7,7 @@ Improved Flight Master experience using continental maps.
 
 Specifically for <b>Cataclysm Classic</b>.
 
+Get you some at <a href="https://www.curseforge.com/wow/addons/flight-master">CurseForge</a>
 # License
 
 [MIT](https://github.com/ramblin-rose/wow-FlightMaster/blob/master/LICENSE)
