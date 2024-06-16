@@ -44,25 +44,11 @@ function AddOn:OnTaxiMapOpened(...)
 	if not hook or hook.OnHide == nil then
 		AddOn:RawHookScript(TaxiFrame, "OnHide", "OnHideTaxiFrame")
 	end
-	-- autoclose map if flight master context is lost
+
 	ToggleWorldMap()
 	WorldMapFrame:SetMapID(AddOn:GetPlayerContinentMapID())
 	AddOn:EnableDataProviderRefresh(true)
 	AddOn:EnableFlightMasterInteractionDistance(true)
-end
---------------------------------
-function AddOn:EnableFlightMasterInteractionDistance(enable)
-	if enable then
-		local timeOutMs = 0.25
-		AddOn.flightMasterMonitor = AddOn.Timer:ScheduleRepeatingTimer(function()
-			if not CheckInteractDistance("target", 3) and UnitName("target") == AddOn.flightMasterContext then
-				WorldMapFrame:Hide()
-			end
-		end, timeOutMs)
-	elseif type(AddOn.flightMasterMonitor) == "number" then
-		AddOn.Timer:CancelTimer(AddOn.flightMasterMonitor)
-		AddOn.flightMasterMonitor = nil
-	end
 end
 --------------------------------
 function AddOn:OnHideWorldMapFrame()
@@ -98,6 +84,30 @@ function AddOn:EnableDataProviderRefresh(enable)
 			else
 				AddOn.Timer:CancelTimer(AddOn.timerId)
 				AddOn.timerId = nil
+			end
+		end, timeOutMs)
+	end
+end
+--------------------------------
+-- autoclose map if interactive distance with flight master is beyond ~7 yards.
+function AddOn:EnableFlightMasterInteractionDistance(enable)
+	if not enable then
+		if AddOn.flightMasterMonitor then
+			AddOn.Timer:CancelTimer(AddOn.flightMasterMonitor)
+			AddOn.flightMasterMonitor = nil
+			if WorldMapFrame:IsVisible() then
+				ToggleWorldMap()
+			end
+		end
+	elseif AddOn.flightMasterMonitor == nil then
+		local timeOutMs = 0.25
+		AddOn.flightMasterMonitor = AddOn.Timer:ScheduleRepeatingTimer(function()
+			if not CheckInteractDistance("target", 3) and UnitName("target") == AddOn.flightMasterContext then
+				AddOn.Timer:CancelTimer(AddOn.flightMasterMonitor)
+				AddOn.flightMasterMonitor = nil
+				if WorldMapFrame:IsVisible() then
+					ToggleWorldMap()
+				end
 			end
 		end, timeOutMs)
 	end
