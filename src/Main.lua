@@ -44,15 +44,31 @@ function AddOn:OnTaxiMapOpened(...)
 	if not hook or hook.OnHide == nil then
 		AddOn:RawHookScript(TaxiFrame, "OnHide", "OnHideTaxiFrame")
 	end
-
+	-- autoclose map if flight master context is lost
 	ToggleWorldMap()
 	WorldMapFrame:SetMapID(AddOn:GetPlayerContinentMapID())
 	AddOn:EnableDataProviderRefresh(true)
+	AddOn:EnableFlightMasterInteractionDistance(true)
+end
+--------------------------------
+function AddOn:EnableFlightMasterInteractionDistance(enable)
+	if enable then
+		local timeOutMs = 0.25
+		AddOn.flightMasterMonitor = AddOn.Timer:ScheduleRepeatingTimer(function()
+			if not CheckInteractDistance("target", 3) and UnitName("target") == AddOn.flightMasterContext then
+				WorldMapFrame:Hide()
+			end
+		end, timeOutMs)
+	elseif type(AddOn.flightMasterMonitor) == "number" then
+		AddOn.Timer:CancelTimer(AddOn.flightMasterMonitor)
+		AddOn.flightMasterMonitor = nil
+	end
 end
 --------------------------------
 function AddOn:OnHideWorldMapFrame()
 	GameTooltip:Hide()
 	AddOn:EnableDataProviderRefresh(false)
+	AddOn:EnableFlightMasterInteractionDistance(false)
 	-- release flight master context
 	if AddOn.flightMasterContext then
 		if AddOn.hooks[TaxiFrame] and AddOn.hooks[TaxiFrame].OnHide then
