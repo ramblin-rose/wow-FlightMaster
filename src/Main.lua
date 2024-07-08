@@ -102,7 +102,7 @@ function AddOn:EnableFlightMasterInteractionDistance(enable)
 	elseif AddOn.flightMasterMonitor == nil then
 		local timeOutMs = 0.25
 		AddOn.flightMasterMonitor = AddOn.Timer:ScheduleRepeatingTimer(function()
-			if not CheckInteractDistance("target", 3) and UnitName("target") == AddOn.flightMasterContext then
+			if not CheckInteractDistance("target", 3) or UnitName("target") ~= AddOn.flightMasterContext then
 				AddOn.Timer:CancelTimer(AddOn.flightMasterMonitor)
 				AddOn.flightMasterMonitor = nil
 				if WorldMapFrame:IsVisible() then
