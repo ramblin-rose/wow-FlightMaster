@@ -36,7 +36,7 @@ function FlightMasterPointDataProviderMixin:RefreshAllData(fromOnShow)
 	self:RemoveAllData()
 	if AddOn.flightMasterContext then
 		local playerContinentMapID = AddOn:GetPlayerContinentMapID()
-		
+
 		AddOn.mapInfo = C_Map.GetMapInfo(self:GetMap():GetMapID())
 		AddOn.frameRouteMap:SetAllPoints()
 		-- mapInfo.mapType 2 (continent) must match player continent;
@@ -139,34 +139,36 @@ end
 --------------------------------
 function FlightMasterPointPinMixin:OnMouseEnter()
 	local index = self.taxiNode.slotIndex
-	local numRoutes = GetNumRoutes(index)
-	local isZone = AddOn.mapInfo and AddOn.mapInfo.mapType ~= 2
-	local line
+	if index > 0 and index < NumTaxiNodes() then
+		local numRoutes = GetNumRoutes(index)
+		local isZone = AddOn.mapInfo and AddOn.mapInfo.mapType ~= 2
+		local line
 
-	AddOn:HideRouteLines()
+		AddOn:HideRouteLines()
 
-	GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-	GameTooltip:AddLine(TaxiNodeName(index), nil, nil, nil, true)
+		GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+		GameTooltip:AddLine(TaxiNodeName(index), nil, nil, nil, true)
 
-	if self.taxiNode.state == Enum.FlightPathState.Reachable then
-		SetTooltipMoney(GameTooltip, TaxiNodeCost(index))
-		for i = 1, numRoutes do
-			line = AddOn:GetRouteLine(i)
-			if i <= numRoutes then
-				AddOn:PerformRouteLineDraw(line, index, i, AddOn.lineCanvas)
-				line:Show()
-			else
-				line:Hide()
+		if self.taxiNode.state == Enum.FlightPathState.Reachable then
+			SetTooltipMoney(GameTooltip, TaxiNodeCost(index))
+			for i = 1, numRoutes do
+				line = AddOn:GetRouteLine(i)
+				if i <= numRoutes then
+					AddOn:PerformRouteLineDraw(line, index, i, AddOn.lineCanvas)
+					line:Show()
+				else
+					line:Hide()
+				end
 			end
+		elseif self.taxiNode.state == Enum.FlightPathState.Unreachable then
+			GameTooltip:AddLine(ERR_TAXINOPATHS, 250, 250, 250, true)
+		elseif self.taxiNode.state == Enum.FlightPathState.Current and not isZone then
+			GameTooltip:AddLine(TAXINODEYOUAREHERE, 1.0, 1.0, 1.0, true)
+			AddOn:DrawOneHopLines()
 		end
-	elseif self.taxiNode.state == Enum.FlightPathState.Unreachable then
-		GameTooltip:AddLine(ERR_TAXINOPATHS, 250, 250, 250, true)
-	elseif self.taxiNode.state == Enum.FlightPathState.Current and not isZone then
-		GameTooltip:AddLine(TAXINODEYOUAREHERE, 1.0, 1.0, 1.0, true)
-		AddOn:DrawOneHopLines()
-	end
 
-	GameTooltip:Show()
+		GameTooltip:Show()
+	end
 end
 --------------------------------
 function FlightMasterPointPinMixin:OnMouseLeave()
