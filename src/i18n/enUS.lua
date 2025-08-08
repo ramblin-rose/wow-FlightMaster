@@ -9,3 +9,5 @@ L.configShowUnknown = "Show Unknown"
 L.configShowUnknownDesc = "Show / hide unknown Flight Masters"
 L.configPOIName = "Flight Point Icon Size"
 L.configPOIDesc = "Select the flight point icon size"
+L.compatQuestieFlightMaster =
+	"Questie's 'Flight Master' icon option is enabled, which may diminish your experience with this addon."

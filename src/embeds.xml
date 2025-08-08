@@ -21,5 +21,6 @@
   <Include file="Message.lua" />
   <Include file="Route.lua" />  
   <Include file="TaxiLog.lua" />
+  <Include file="Compatibility.lua" />
     <Include file="FlightMasterPointPinTemplate.xml" />  
 </Ui>
