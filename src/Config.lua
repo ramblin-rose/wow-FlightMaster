@@ -101,6 +101,7 @@ end
 function AddOn:SetDefaultOptions()
 	self:SetEnabled(true)
 	self:SetShowUnknownFlightMasters(AddOn.db.global.showUnknownFlightMasters)
+	self:SetPoiDimension(14)
 	self:SetAutoCancelShapeShift(AddOn.db.global.autoCancelShapeShift)
 end
 --------------------------------
