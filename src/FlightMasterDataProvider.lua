@@ -6,6 +6,13 @@ function AddOn:InitFlightMasterDataProvider()
 	AddOn.taxiNodePositions = {}
 	AddOn.showUnknownPoints = false
 	AddOn.dataProvider = CreateFromMixins(FlightMasterPointDataProviderMixin)
+	AddOn.pointPinTemplate = "FlightMasterPointPinTemplate"
+	AddOn.pinPools = AddOn.pinPools or {}
+	AddOn.pinPools[AddOn.pointPinTemplate] =
+		CreateFramePool("Button", WorldMapFrame.scrollContainer or WorldMapFrame, AddOn.pointPinTemplate)
+	-- Determine if player is a class that shapechanges - druid of shaman - and setup the cancelform feature.
+	local _, _, classId = UnitClass("player")
+	AddOn.isPlayerShapeShifter = classId == 11 or classId == 7
 	WorldMapFrame:AddDataProvider(AddOn.dataProvider)
 end
 --------------------------------
@@ -15,7 +22,7 @@ function FlightMasterPointDataProviderMixin:OnAdded(mapCanvas)
 end
 --------------------------------
 function FlightMasterPointDataProviderMixin:RemoveAllData()
-	self:GetMap():RemoveAllPinsByTemplate("FlightMasterPointPinTemplate")
+	self:GetMap():RemoveAllPinsByTemplate(AddOn.pointPinTemplate)
 	AddOn:HideRouteLines()
 	wipe(AddOn.taxiNodePositions)
 	AddOn.currentTaxiNode = nil
@@ -30,6 +37,19 @@ function FlightMasterPointDataProviderMixin:GetNamedMapTaxiNodes(mapID)
 	end
 
 	return taxiNodeNameMap, #mapTaxiNodes
+end
+--------------------------------
+function FlightMasterPointDataProviderMixin:GetSecureTaxiMacroFormatString()
+	if AddOn.isPlayerShapeShifter and AddOn:GetAutoCancelShapeShift() then
+		-- stylua: ignore start
+		return [[
+/cancelform [nocombat]
+/script TakeTaxiNode(%d)
+]]
+		-- stylua: ignore end
+	else
+		return [[/script TakeTaxiNode(%d)]]
+	end
 end
 --------------------------------
 function FlightMasterPointDataProviderMixin:RefreshAllData(fromOnShow)
@@ -52,6 +72,7 @@ function FlightMasterPointDataProviderMixin:RefreshAllData(fromOnShow)
 			local name, pin, taxiNode, nodeType
 			local taxiNodeNameMap = self:GetNamedMapTaxiNodes(AddOn.mapInfo.mapID)
 			local shouldShowUnknown = AddOn:GetShowUnknownFlightMasters()
+			local secureTaxiMacroFormatString = self:GetSecureTaxiMacroFormatString()
 			for i = 1, numNodes do
 				name = TaxiNodeName(i)
 				taxiNode = taxiNodeNameMap[name]
@@ -63,9 +84,10 @@ function FlightMasterPointDataProviderMixin:RefreshAllData(fromOnShow)
 						or (taxiNode.state == Enum.FlightPathState.Unreachable and shouldShowUnknown)
 					)
 				then
-					pin = self:GetMap():AcquirePin("FlightMasterPointPinTemplate", taxiNode)
+					pin = self:GetMap():AcquirePin(AddOn.pointPinTemplate, taxiNode)
 					pin.taxiNode = taxiNode
-
+					pin:SetAttribute("type", "macro")
+					pin:SetAttribute("macrotext", string.format(secureTaxiMacroFormatString, pin.taxiNode.slotIndex))
 					-- intentionally updating texture outside of SetTexture
 					pin:UpdateTexture()
 
@@ -177,13 +199,4 @@ end
 --------------------------------
 function FlightMasterPointPinMixin:IsMouseClickEnabled()
 	return true
-end
---------------------------------
-function FlightMasterPointPinMixin:OnMouseDown()
-	-- preliminary code for taxi logging feature.
-	local sourceNode = AddOn.originTaxiNode
-	local destNode = self.taxiNode
-	local key = AddOn:GetTaxiLogKey(sourceNode.position, destNode.position)
-	AddOn:SendMessage(AddOn.Message.TAXI_START, AddOn:GetPlayerContinentMapID(), key)
-	TakeTaxiNode(self.taxiNode.slotIndex)
 end

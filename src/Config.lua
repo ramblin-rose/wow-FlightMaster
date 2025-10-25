@@ -65,11 +65,24 @@ local options = {
 				return AddOn:GetPoiDimension()
 			end,
 		},
+		autoCancelShapeShift = {
+			order = optIndex(),
+			name = L.configAutoCancelShapeShift,
+			desc = L.configAutoCancelShapeShiftDesc,
+			type = "toggle",
+			width = "double",
+			set = function(info, val)
+				AddOn:SetAutoCancelShapeShift(val)
+			end,
+			get = function(info)
+				return AddOn:GetAutoCancelShapeShift()
+			end,
+		},
 	},
 }
 
 local dbDefaults = {
-	global = { showUnknownFlightMasters = false, poiPinDimension = 14 },
+	global = { showUnknownFlightMasters = false, poiPinDimension = 14, autoCancelShapeShift = true },
 }
 function AddOn:InitConfig()
 	AddOn.db = LibStub("AceDB-3.0"):New(AddOn.name .. "DB", dbDefaults, true)
@@ -88,6 +101,7 @@ end
 function AddOn:SetDefaultOptions()
 	self:SetEnabled(true)
 	self:SetShowUnknownFlightMasters(AddOn.db.global.showUnknownFlightMasters)
+	self:SetShowUnknownFlightMasters(AddOn.db.global.autoCancelShapeShift)
 end
 --------------------------------
 function AddOn:SetEnabled(enable)
@@ -117,5 +131,13 @@ end
 --------------------------------
 function AddOn:GetPoiDimension()
 	return AddOn.db.global.poiPinDimension
+end
+--------------------------------
+function AddOn:SetAutoCancelShapeShift(val)
+	AddOn.db.global.autoCancelShapeShift = val
+end
+--------------------------------
+function AddOn:GetAutoCancelShapeShift()
+	return AddOn.db.global.autoCancelShapeShift
 end
 --------------------------------
