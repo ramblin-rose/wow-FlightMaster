@@ -1,8 +1,8 @@
 {
   "name": "flight-master",
   "title": "Flight Master",
-  "version": "1.4.0",
-  "interface": "50501",
+  "version": "1.4.1",
+  "interface": "50503",
   "description": "A better flight master experience using the world map",
   "main": "gulpfile.js",
   "type": "module",
