@@ -86,6 +86,8 @@ function FlightMasterPointDataProviderMixin:RefreshAllData(fromOnShow)
 				then
 					pin = self:GetMap():AcquirePin(AddOn.pointPinTemplate, taxiNode)
 					pin.taxiNode = taxiNode
+					pin:EnableMouse(true)
+					pin:RegisterForClicks("LeftButtonUp", "LeftButtonDown")
 					pin:SetAttribute("type", "macro")
 					pin:SetAttribute("macrotext", string.format(secureTaxiMacroFormatString, pin.taxiNode.slotIndex))
 					-- intentionally updating texture outside of SetTexture

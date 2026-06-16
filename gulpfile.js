@@ -59,37 +59,40 @@ function toc(cb) {
   const output = path.join("build", util.name);
   return src(`src/${util.name}.toc`)
     .pipe(
-      replace(/^[\s]*##[\s]*Title[\s]*:.*$/gm, "## Title: " + packageJson.title)
+      replace(
+        /^[\s]*##[\s]*Title[\s]*:.*$/gm,
+        "## Title: " + packageJson.title,
+      ),
     )
     .pipe(
       replace(
         /^[\s]*##[\s]*Description[\s]*:.*$/gm,
-        "## Description: " + packageJson.description
-      )
+        "## Description: " + packageJson.description,
+      ),
     )
     .pipe(
       replace(
         /^[\s]*##[\s]*Version[\s]*:.*$/gm,
-        "## Version: " + packageJson.version
-      )
+        "## Version: " + packageJson.version,
+      ),
     )
     .pipe(
       replace(
         /^[\s]*##[\s]*Interface[\s]*:.*$/gm,
-        "## Interface: " + packageJson.interface
-      )
+        "## Interface: " + packageJson.interface,
+      ),
     )
     .pipe(
       replace(
         /^[\s]*##[\s]*Author[\s]*:.*$/gm,
-        "## Author: " + packageJson.author
-      )
+        "## Author: " + packageJson.author,
+      ),
     )
     .pipe(
       replace(
         /^[\s]*##[\s]*SavedVariables[\s]*:.*$/gm,
-        `## SavedVariables: ${util.name}DB`
-      )
+        `## SavedVariables: ${util.name}DB`,
+      ),
     )
     .pipe(dest(output))
     .pipe(touch());
@@ -102,12 +105,16 @@ function dev(_) {
   watch(
     ["package.json", "src/**/*"],
     { ignoreInitial: false },
-    series(configure, codes, assets, toc, addons)
+    series(configure, codes, assets, toc, addons),
   );
 }
 //////////////////////////////////
 function addons(cb) {
-  const output = process.env.WOW_ADDON_DEST_FOLDER;
+  const path = process.env.WOW_ADDON_DEST_FOLDER;
+  const output =
+    path.charAt(path.length - 1) == ";" ?
+      path.substring(0, path.length - 1)
+    : path;
   console.log("Copying build to " + output);
   return src("build/**/*", { ignoreInitial: false, encoding: false })
     .pipe(newer(output))
