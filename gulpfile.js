@@ -23,6 +23,10 @@ class util {
   static get zipName() {
     return `${util.archiveName}.zip`;
   }
+  // path to icon used by WoW's AddOn list dialog e.g. Game Menu -> AddOns
+  static get iconTexture() {
+    return `Interface\\AddOns\\${util.name}\\assets\\icon`;
+  }
 }
 //////////////////////////////////
 function configure(cb) {
@@ -49,8 +53,9 @@ function attributions(cb) {
 }
 //////////////////////////////////
 function assets(cb) {
-  const output = path.join("build", util.name);
-  return src("src/**/*.png", { ignoreInitial: false, encoding: false })
+  const output = path.join("build", util.name, "assets");
+  const files = ["src/assets/wings.png", "src/assets/icon.tga"];
+  return src(files, { ignoreInitial: false, encoding: false })
     .pipe(dest(output))
     .pipe(touch());
 }
@@ -92,6 +97,12 @@ function toc(cb) {
       replace(
         /^[\s]*##[\s]*SavedVariables[\s]*:.*$/gm,
         `## SavedVariables: ${util.name}DB`,
+      ),
+    )
+    .pipe(
+      replace(
+        /^[\s]*##[\s]*IconTexture[\s]*:.*$/gm,
+        `## IconTexture: ${util.iconTexture}`,
       ),
     )
     .pipe(dest(output))
