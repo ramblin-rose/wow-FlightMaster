@@ -4,5 +4,6 @@
 ## Author: 
 ## Interface: 
 ## SavedVariables:
+## IconTexture:
 embeds.xml
 Main.lua 
