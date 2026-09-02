@@ -4,7 +4,7 @@
 
 Improved Flight Master experience using continental maps.
 
-Once specifically for <b>Cataclysm Classic</b>, now <b>Mists of Pandaria 🐼</b>
+Once specifically for Cataclysm Classic, Mists of Pandaria 🐼, and now <b>TBC Anniversary</b>.
 
 Get you some at <a href="https://www.curseforge.com/wow/addons/flight-master">CurseForge</a>
 
