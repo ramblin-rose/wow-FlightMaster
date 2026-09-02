@@ -1,9 +1,51 @@
 ﻿## Title: 
+## Title-deDE: Flugmeister
+## Title-esES: Maestro de vuelo
+## Title-esMX: Maestro de vuelo
+## Title-frFR: Maître de vol
+## Title-itIT: Maestro di volo
+## Title-koKR: 비행 조련사
+## Title-ptBR: Mestre de Voo
+## Title-ruRU: Распорядитель полетов
+## Title-zhCN: 飞行管理员
+## Title-zhTW: 飛行管理員
 ## Description:
+## Description-deDE: Ein besseres Flugmeister-Erlebnis mithilfe der Weltkarte
+## Description-esES: Una mejor experiencia de maestro de vuelo usando el mapa del mundo
+## Description-esMX: Una mejor experiencia de maestro de vuelo usando el mapa del mundo
+## Description-frFR: Une meilleure expérience de maître de vol grâce à la carte du monde
+## Description-itIT: Un'esperienza migliore con il maestro di volo usando la mappa del mondo
+## Description-koKR: 세계 지도를 사용하는 더 나은 비행 조련사 경험
+## Description-ptBR: Uma melhor experiência de mestre de voo usando o mapa-múndi
+## Description-ruRU: Улучшенный интерфейс распорядителя полетов с использованием карты мира
+## Description-zhCN: 使用世界地图获得更好的飞行管理员体验
+## Description-zhTW: 使用世界地圖獲得更好的飛行管理員體驗
 ## Version:
+## Category: Map
+## Category-deDE: Karte
+## Category-esES: Mapa
+## Category-esMX: Mapa
+## Category-frFR: Carte
+## Category-itIT: Mappa
+## Category-koKR: 지도
+## Category-ptBR: Mapa
+## Category-ruRU: Карта
+## Category-zhCN: 地图
+## Category-zhTW: 地圖
+## Notes: A better flight master taxi experience employing world maps.
+## Notes-deDE: Ein besseres Flugmeister-Erlebnis für Flugreisen mithilfe von Weltkarten.
+## Notes-esES: Una mejor experiencia de viaje aéreo con el maestro de vuelo mediante mapas del mundo.
+## Notes-esMX: Una mejor experiencia de viaje aéreo con el maestro de vuelo mediante mapas del mundo.
+## Notes-frFR: Une meilleure expérience de trajet aérien auprès du maître de vol grâce aux cartes du monde.
+## Notes-itIT: Un'esperienza di volo migliore con il maestro di volo, impiegando le mappe del mondo.
+## Notes-koKR: 세계 지도를 활용한 더 나은 비행 조련사 이동 경험.
+## Notes-ptBR: Uma melhor experiência de voo com o mestre de voo usando mapas-múndi.
+## Notes-ruRU: Улучшенный интерфейс полётов у распорядителя полетов с использованием карт мира.
+## Notes-zhCN: 使用世界地图获得更好的飞行管理员航线体验。
+## Notes-zhTW: 使用世界地圖獲得更好的飛行管理員航線體驗。
 ## Author: 
 ## Interface: 
 ## SavedVariables:
 ## IconTexture:
 embeds.xml
-Main.lua 
+Main.lua  
