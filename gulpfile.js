@@ -54,7 +54,7 @@ function attributions(cb) {
 //////////////////////////////////
 function assets(cb) {
   const output = path.join("build", util.name, "assets");
-  const files = ["src/assets/wings.png", "src/assets/icon.tga"];
+  const files = ["src/assets/icon.tga"];
   return src(files, { ignoreInitial: false, encoding: false })
     .pipe(dest(output))
     .pipe(touch());
@@ -65,13 +65,13 @@ function toc(cb) {
   return src(`src/${util.name}.toc`)
     .pipe(
       replace(
-        /^[\s]*##[\s]*Title[\s]*:.*$/gm,
+        /^[\s]*##[\s]*Title(?!-)[\s]*:.*$/gm,
         "## Title: " + packageJson.title,
       ),
     )
     .pipe(
       replace(
-        /^[\s]*##[\s]*Description[\s]*:.*$/gm,
+        /^[\s]*##[\s]*Description(?!-)[\s]*:.*$/gm,
         "## Description: " + packageJson.description,
       ),
     )
