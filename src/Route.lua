@@ -26,8 +26,15 @@ end
 --------------------------------
 function AddOn:PerformRouteLineDraw(line, taxiNodeIndex, routeNodeIndex, frame)
 	local taxiNodePositions = AddOn.taxiNodePositions
-	local src = taxiNodePositions[TaxiGetNodeSlot(taxiNodeIndex, routeNodeIndex, true)]
-	local dst = taxiNodePositions[TaxiGetNodeSlot(taxiNodeIndex, routeNodeIndex, false)]
+	local srcSlot = TaxiGetNodeSlot(taxiNodeIndex, routeNodeIndex, true)
+	local dstSlot = TaxiGetNodeSlot(taxiNodeIndex, routeNodeIndex, false)
+	local src = srcSlot and taxiNodePositions[srcSlot]
+	local dst = dstSlot and taxiNodePositions[dstSlot]
+	-- Last hop must end at the hovered destination even if TBC reports a
+	-- waypoint slot that is not a flight master.
+	if not dst and routeNodeIndex == GetNumRoutes(taxiNodeIndex) then
+		dst = taxiNodePositions[taxiNodeIndex]
+	end
 
 	if src and dst then
 		local w, h = AddOn:GetFrameDim(frame)
@@ -61,8 +68,8 @@ function AddOn:DrawOneHopLines()
 
 		for i = 1, numNodes do
 			nodeType = TaxiNodeGetType(i)
-			---@diagnostic disable-next-line: redundant-parameter
-			if (nodeType == "REACHABLE") and (not TaxiIsDirectFlight or TaxiIsDirectFlight(i)) then
+			-- Stock Classic/TBC uses GetNumRoutes == 1; TaxiIsDirectFlight is later-only.
+			if nodeType == "REACHABLE" and GetNumRoutes(i) == 1 then
 				numSingleHops = numSingleHops + 1
 				numLines = numLines + 1
 				line = AddOn:GetRouteLine(numLines)

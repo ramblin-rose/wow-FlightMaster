@@ -84,18 +84,35 @@ function AddOn:OnTaxiMapOpened(...)
 	AddOn:EnableFlightMasterInteractionDistance(true)
 end
 --------------------------------
+function AddOn:OnShowWorldMapFrame()
+	if AddOn.pendingTaxiRelease then
+		AddOn.Timer:CancelTimer(AddOn.pendingTaxiRelease)
+		AddOn.pendingTaxiRelease = nil
+	end
+end
+--------------------------------
 function AddOn:OnHideWorldMapFrame()
 	GameTooltip:Hide()
-	AddOn:EnableDataProviderRefresh(false)
-	AddOn:EnableFlightMasterInteractionDistance(false)
-	-- release flight master context
-	if AddOn.flightMasterContext then
-		if AddOn.hooks[TaxiFrame] and AddOn.hooks[TaxiFrame].OnHide then
-			AddOn.hooks[TaxiFrame]:OnHide(TaxiFrame)
-			AddOn:Unhook(TaxiFrame, "OnHide")
-		end
-		AddOn.flightMasterContext = nil
+	if AddOn.pendingTaxiRelease then
+		AddOn.Timer:CancelTimer(AddOn.pendingTaxiRelease)
 	end
+	-- Large↔small fires OnHide then OnShow for UIPanel layout. Only
+	-- release the taxi session if the map stays closed.
+	AddOn.pendingTaxiRelease = AddOn.Timer:ScheduleTimer(function()
+		AddOn.pendingTaxiRelease = nil
+		if WorldMapFrame:IsShown() then
+			return
+		end
+		AddOn:EnableDataProviderRefresh(false)
+		AddOn:EnableFlightMasterInteractionDistance(false)
+		if AddOn.flightMasterContext then
+			if AddOn.hooks[TaxiFrame] and AddOn.hooks[TaxiFrame].OnHide then
+				AddOn.hooks[TaxiFrame]:OnHide(TaxiFrame)
+				AddOn:Unhook(TaxiFrame, "OnHide")
+			end
+			AddOn.flightMasterContext = nil
+		end
+	end, 0)
 end
 --------------------------------
 -- tbd deeper understanding of data provider framework may negate this workaround
@@ -128,9 +145,6 @@ function AddOn:EnableFlightMasterInteractionDistance(enable)
 		if AddOn.flightMasterMonitor then
 			AddOn.Timer:CancelTimer(AddOn.flightMasterMonitor)
 			AddOn.flightMasterMonitor = nil
-			if WorldMapFrame:IsVisible() then
-				ToggleWorldMap()
-			end
 		end
 	elseif AddOn.flightMasterMonitor == nil then
 		local timeOutMs = 0.25
