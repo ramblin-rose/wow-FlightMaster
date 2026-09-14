@@ -39,6 +39,33 @@ function FlightMasterPointDataProviderMixin:GetNamedMapTaxiNodes(mapID)
 	return taxiNodeNameMap, #mapTaxiNodes
 end
 --------------------------------
+local function shortTaxiName(name)
+	if type(name) ~= "string" then
+		return ""
+	end
+	local short = name:match("^([^,]+)") or name
+	return short:gsub("^%s+", ""):gsub("%s+$", ""):lower()
+end
+--------------------------------
+function FlightMasterPointDataProviderMixin:FindNamedMapTaxiNode(taxiNodeNameMap, name)
+	if not name then
+		return
+	end
+	local taxiNode = taxiNodeNameMap[name]
+	if taxiNode then
+		return taxiNode
+	end
+	local short = shortTaxiName(name)
+	if short == "" then
+		return
+	end
+	for nodeName, node in pairs(taxiNodeNameMap) do
+		if shortTaxiName(nodeName) == short then
+			return node
+		end
+	end
+end
+--------------------------------
 function FlightMasterPointDataProviderMixin:GetSecureTaxiMacroFormatString()
 	if AddOn.isPlayerShapeShifter and AddOn:GetAutoCancelShapeShift() then
 		-- stylua: ignore start
@@ -69,34 +96,44 @@ function FlightMasterPointDataProviderMixin:RefreshAllData(fromOnShow)
 
 		if isValidZoneMap or isValidContinentMap then
 			local numNodes = NumTaxiNodes()
-			local name, pin, taxiNode, nodeType
+			local name, pin, taxiNode, sessionType
 			local taxiNodeNameMap = self:GetNamedMapTaxiNodes(AddOn.mapInfo.mapID)
 			local shouldShowUnknown = AddOn:GetShowUnknownFlightMasters()
 			local secureTaxiMacroFormatString = self:GetSecureTaxiMacroFormatString()
 			for i = 1, numNodes do
 				name = TaxiNodeName(i)
-				taxiNode = taxiNodeNameMap[name]
+				taxiNode = self:FindNamedMapTaxiNode(taxiNodeNameMap, name)
+				sessionType = TaxiNodeGetType(i)
 
-				if
-					taxiNode
+				-- Always keep hop endpoints, including TBC DISTANT nodes.
+				-- C_TaxiMap.slotIndex is not the live taxi-session index.
+				if taxiNode then
+					taxiNode.slotIndex = i
+					AddOn.taxiNodePositions[i] = taxiNode
+				end
+
+				local isSessionFlyable = sessionType == "CURRENT" or sessionType == "REACHABLE"
+				local shouldShowPin = taxiNode
 					and (
-						taxiNode.state ~= Enum.FlightPathState.Unreachable
-						or (taxiNode.state == Enum.FlightPathState.Unreachable and shouldShowUnknown)
+						isSessionFlyable
+						or taxiNode.state ~= Enum.FlightPathState.Unreachable
+						or shouldShowUnknown
 					)
-				then
+
+				if shouldShowPin then
 					pin = self:GetMap():AcquirePin(AddOn.pointPinTemplate, taxiNode)
 					pin.taxiNode = taxiNode
+					pin.taxiSlotIndex = i
 					pin:EnableMouse(true)
 					pin:RegisterForClicks("LeftButtonUp", "LeftButtonDown")
 					pin:SetAttribute("type", "macro")
-					pin:SetAttribute("macrotext", string.format(secureTaxiMacroFormatString, pin.taxiNode.slotIndex))
+					pin:SetAttribute("macrotext", string.format(secureTaxiMacroFormatString, i))
 					-- intentionally updating texture outside of SetTexture
 					pin:UpdateTexture()
 
-					if pin.taxiNode.state == Enum.FlightPathState.Current then
+					if sessionType == "CURRENT" or pin.taxiNode.state == Enum.FlightPathState.Current then
 						AddOn.originTaxiNode = taxiNode
 					end
-					AddOn.taxiNodePositions[i] = taxiNode
 				end
 			end
 			if AddOn.mapInfo.mapType == 2 then
@@ -151,8 +188,20 @@ FlightPathNodeTexture[Enum.FlightPathState.Unreachable] = {
 }
 --------------------------------
 function FlightMasterPointPinMixin:UpdateTexture()
-	if self.taxiNode then
-		local texInfo = FlightPathNodeTexture[self.taxiNode.state]
+	local state = self.taxiNode and self.taxiNode.state
+	local slotIndex = self.taxiSlotIndex or (self.taxiNode and self.taxiNode.slotIndex)
+	if slotIndex and slotIndex >= 1 and slotIndex <= NumTaxiNodes() then
+		local sessionType = TaxiNodeGetType(slotIndex)
+		if sessionType == "CURRENT" then
+			state = Enum.FlightPathState.Current
+		elseif sessionType == "REACHABLE" then
+			state = Enum.FlightPathState.Reachable
+		elseif sessionType == "DISTANT" then
+			state = Enum.FlightPathState.Unreachable
+		end
+	end
+	local texInfo = state and FlightPathNodeTexture[state]
+	if texInfo then
 		self.Texture:SetTexture(texInfo.file)
 		self.HighlightTexture:SetTexture("Interface\\TaxiFrame\\UI-Taxi-Icon-Yellow")
 	else
@@ -162,37 +211,40 @@ function FlightMasterPointPinMixin:UpdateTexture()
 end
 --------------------------------
 function FlightMasterPointPinMixin:OnMouseEnter()
-	local index = self.taxiNode.slotIndex
-	if index > 0 and index < NumTaxiNodes() then
-		local numRoutes = GetNumRoutes(index)
-		local isZone = AddOn.mapInfo and AddOn.mapInfo.mapType ~= 2
-		local line
-
-		AddOn:HideRouteLines()
-
-		GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-		GameTooltip:AddLine(TaxiNodeName(index), nil, nil, nil, true)
-
-		if self.taxiNode.state == Enum.FlightPathState.Reachable then
-			SetTooltipMoney(GameTooltip, TaxiNodeCost(index))
-			for i = 1, numRoutes do
-				line = AddOn:GetRouteLine(i)
-				if i <= numRoutes then
-					AddOn:PerformRouteLineDraw(line, index, i, AddOn.lineCanvas)
-					line:Show()
-				else
-					line:Hide()
-				end
-			end
-		elseif self.taxiNode.state == Enum.FlightPathState.Unreachable then
-			GameTooltip:AddLine(ERR_TAXINOPATHS, 250, 250, 250, true)
-		elseif self.taxiNode.state == Enum.FlightPathState.Current and not isZone then
-			GameTooltip:AddLine(TAXINODEYOUAREHERE, 1.0, 1.0, 1.0, true)
-			AddOn:DrawOneHopLines()
-		end
-
-		GameTooltip:Show()
+	local index = self.taxiSlotIndex or (self.taxiNode and self.taxiNode.slotIndex)
+	if not index or index < 1 or index > NumTaxiNodes() then
+		return
 	end
+
+	local numRoutes = GetNumRoutes(index)
+	local isZone = AddOn.mapInfo and AddOn.mapInfo.mapType ~= 2
+	local sessionType = TaxiNodeGetType(index)
+	local line
+
+	AddOn:HideRouteLines()
+
+	GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+	GameTooltip:AddLine(TaxiNodeName(index), nil, nil, nil, true)
+
+	if sessionType == "REACHABLE" then
+		SetTooltipMoney(GameTooltip, TaxiNodeCost(index))
+		for i = 1, numRoutes do
+			line = AddOn:GetRouteLine(i)
+			if i <= numRoutes then
+				AddOn:PerformRouteLineDraw(line, index, i, AddOn.lineCanvas)
+				line:Show()
+			else
+				line:Hide()
+			end
+		end
+	elseif sessionType == "DISTANT" or sessionType == "NONE" then
+		GameTooltip:AddLine(ERR_TAXINOPATHS, 250, 250, 250, true)
+	elseif sessionType == "CURRENT" and not isZone then
+		GameTooltip:AddLine(TAXINODEYOUAREHERE, 1.0, 1.0, 1.0, true)
+		AddOn:DrawOneHopLines()
+	end
+
+	GameTooltip:Show()
 end
 --------------------------------
 function FlightMasterPointPinMixin:OnMouseLeave()
