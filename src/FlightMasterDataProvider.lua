@@ -9,7 +9,10 @@ function AddOn:InitFlightMasterDataProvider()
 	AddOn.pointPinTemplate = "FlightMasterPointPinTemplate"
 	AddOn.pinPools = AddOn.pinPools or {}
 	AddOn.pinPools[AddOn.pointPinTemplate] =
-		CreateFramePool("Button", WorldMapFrame.scrollContainer or WorldMapFrame, AddOn.pointPinTemplate)
+		CreateFramePool("Button", WorldMapFrame.ScrollContainer or WorldMapFrame.scrollContainer or WorldMapFrame, AddOn.pointPinTemplate)
+	if WorldMapFrame.SetPinTemplateType then
+		WorldMapFrame:SetPinTemplateType(AddOn.pointPinTemplate, "Button")
+	end
 	-- Determine if player is a class that shapechanges - druid of shaman - and setup the cancelform feature.
 	local _, _, classId = UnitClass("player")
 	AddOn.isPlayerShapeShifter = classId == 11 or classId == 7
@@ -28,15 +31,84 @@ function FlightMasterPointDataProviderMixin:RemoveAllData()
 	AddOn.currentTaxiNode = nil
 end
 --------------------------------
-function FlightMasterPointDataProviderMixin:GetNamedMapTaxiNodes(mapID)
-	local mapTaxiNodes = C_TaxiMap.GetAllTaxiNodes(mapID)
-	local taxiNodeNameMap = {}
-
-	for _, e in ipairs(mapTaxiNodes) do
-		taxiNodeNameMap[e.name] = e
+local function shortTaxiName(name)
+	if type(name) ~= "string" then
+		return ""
 	end
-
-	return taxiNodeNameMap, #mapTaxiNodes
+	local short = name:match("^([^,]+)") or name
+	short = short:gsub("^%s+", ""):gsub("%s+$", ""):lower()
+	return short
+end
+--------------------------------
+local function namesLooselyEqual(a, b)
+	if a == b then
+		return true
+	end
+	if #a < 5 or #b < 5 then
+		return false
+	end
+	return a:sub(1, #b) == b or b:sub(1, #a) == a
+end
+--------------------------------
+local function ingestTaxiNodes(nodes, bySlot, byName, byShort, hasSlot)
+	if type(nodes) ~= "table" then
+		return
+	end
+	for _, node in ipairs(nodes) do
+		if hasSlot and node.slotIndex and node.slotIndex > 0 then
+			bySlot[node.slotIndex] = node
+		end
+		if node.name then
+			byName[node.name] = byName[node.name] or node
+			local short = shortTaxiName(node.name)
+			if short ~= "" then
+				byShort[short] = byShort[short] or node
+			end
+		end
+	end
+end
+--------------------------------
+function FlightMasterPointDataProviderMixin:GetMapTaxiNodeLookup(mapID)
+	local bySlot, byName, byShort = {}, {}, {}
+	if mapID and C_TaxiMap then
+		if C_TaxiMap.GetAllTaxiNodes then
+			ingestTaxiNodes(C_TaxiMap.GetAllTaxiNodes(mapID), bySlot, byName, byShort, true)
+		end
+		if not next(bySlot) and not next(byName) and C_TaxiMap.GetTaxiNodesForMap then
+			ingestTaxiNodes(C_TaxiMap.GetTaxiNodesForMap(mapID), bySlot, byName, byShort, false)
+		end
+	end
+	return bySlot, byName, byShort
+end
+--------------------------------
+function FlightMasterPointDataProviderMixin:FindTaxiNode(slotIndex, name, bySlot, byName, byShort)
+	if slotIndex and bySlot[slotIndex] then
+		return bySlot[slotIndex]
+	end
+	if name and byName[name] then
+		return byName[name]
+	end
+	local short = shortTaxiName(name)
+	if short == "" then
+		return
+	end
+	if byShort[short] then
+		return byShort[short]
+	end
+	for key, node in pairs(byShort) do
+		if namesLooselyEqual(short, key) then
+			return node
+		end
+	end
+end
+--------------------------------
+local function taxiNodeTypeToState(nodeType)
+	if nodeType == "CURRENT" then
+		return Enum.FlightPathState.Current
+	elseif nodeType == "REACHABLE" then
+		return Enum.FlightPathState.Reachable
+	end
+	return Enum.FlightPathState.Unreachable
 end
 --------------------------------
 function FlightMasterPointDataProviderMixin:GetSecureTaxiMacroFormatString()
@@ -58,24 +130,36 @@ function FlightMasterPointDataProviderMixin:RefreshAllData(fromOnShow)
 		local playerContinentMapID = AddOn:GetPlayerContinentMapID()
 
 		AddOn.mapInfo = C_Map.GetMapInfo(self:GetMap():GetMapID())
+		if not AddOn.mapInfo then
+			return
+		end
 		AddOn.frameRouteMap:SetAllPoints()
-		-- mapInfo.mapType 2 (continent) must match player continent;
-		-- mapInfo.mayType 3 (zone) must be a zone in player continent;
+		-- continent must match player continent;
+		-- zone (or other child map) must belong to player continent;
 		-- ignore otherwise.
-		local isValidZoneMap = AddOn.mapInfo.mapType == 3
+		local continentMapType = AddOn:GetContinentMapType()
+		local isValidZoneMap = AddOn.mapInfo.mapType > continentMapType
 			and (AddOn:GetNearestContinentID(AddOn.mapInfo.mapID) == playerContinentMapID)
 
-		local isValidContinentMap = AddOn.mapInfo.mapType == 2 and AddOn.mapInfo.mapID == playerContinentMapID
+		local isValidContinentMap = AddOn.mapInfo.mapType == continentMapType
+			and AddOn.mapInfo.mapID == playerContinentMapID
 
 		if isValidZoneMap or isValidContinentMap then
 			local numNodes = NumTaxiNodes()
-			local name, pin, taxiNode, nodeType
-			local taxiNodeNameMap = self:GetNamedMapTaxiNodes(AddOn.mapInfo.mapID)
+			local name, pin, taxiNode
+			local bySlot, byName, byShort = self:GetMapTaxiNodeLookup(AddOn.mapInfo.mapID)
 			local shouldShowUnknown = AddOn:GetShowUnknownFlightMasters()
 			local secureTaxiMacroFormatString = self:GetSecureTaxiMacroFormatString()
 			for i = 1, numNodes do
 				name = TaxiNodeName(i)
-				taxiNode = taxiNodeNameMap[name]
+				taxiNode = self:FindTaxiNode(i, name, bySlot, byName, byShort)
+
+				if taxiNode then
+					taxiNode.slotIndex = taxiNode.slotIndex or i
+					if taxiNode.state == nil then
+						taxiNode.state = taxiNodeTypeToState(TaxiNodeGetType(i))
+					end
+				end
 
 				if
 					taxiNode
@@ -99,7 +183,7 @@ function FlightMasterPointDataProviderMixin:RefreshAllData(fromOnShow)
 					AddOn.taxiNodePositions[i] = taxiNode
 				end
 			end
-			if AddOn.mapInfo.mapType == 2 then
+			if AddOn.mapInfo.mapType == continentMapType then
 				AddOn:DrawOneHopLines()
 			end
 		end
@@ -151,8 +235,8 @@ FlightPathNodeTexture[Enum.FlightPathState.Unreachable] = {
 }
 --------------------------------
 function FlightMasterPointPinMixin:UpdateTexture()
-	if self.taxiNode then
-		local texInfo = FlightPathNodeTexture[self.taxiNode.state]
+	local texInfo = self.taxiNode and FlightPathNodeTexture[self.taxiNode.state]
+	if texInfo then
 		self.Texture:SetTexture(texInfo.file)
 		self.HighlightTexture:SetTexture("Interface\\TaxiFrame\\UI-Taxi-Icon-Yellow")
 	else
@@ -162,10 +246,13 @@ function FlightMasterPointPinMixin:UpdateTexture()
 end
 --------------------------------
 function FlightMasterPointPinMixin:OnMouseEnter()
+	if not self.taxiNode then
+		return
+	end
 	local index = self.taxiNode.slotIndex
-	if index > 0 and index < NumTaxiNodes() then
+	if index > 0 and index <= NumTaxiNodes() then
 		local numRoutes = GetNumRoutes(index)
-		local isZone = AddOn.mapInfo and AddOn.mapInfo.mapType ~= 2
+		local isZone = AddOn.mapInfo and AddOn.mapInfo.mapType ~= AddOn:GetContinentMapType()
 		local line
 
 		AddOn:HideRouteLines()

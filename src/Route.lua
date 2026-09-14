@@ -33,13 +33,19 @@ function AddOn:PerformRouteLineDraw(line, taxiNodeIndex, routeNodeIndex, frame)
 		local w, h = AddOn:GetFrameDim(frame)
 		src = src.position
 		dst = dst.position
-		if src and dst then
-			local sx, sy, dx, dy
-			sx = src.x * w
-			sy = (1.0 - src.y) * h
-			dx = dst.x * w
-			dy = (1.0 - dst.y) * h
-			DrawLine(line, frame, sx, sy, dx, dy, 32, TAXIROUTE_LINEFACTOR)
+		local sx, sy, dx, dy
+		if src and src.GetXY then
+			sx, sy = src:GetXY()
+		elseif src then
+			sx, sy = src.x, src.y
+		end
+		if dst and dst.GetXY then
+			dx, dy = dst:GetXY()
+		elseif dst then
+			dx, dy = dst.x, dst.y
+		end
+		if sx and sy and dx and dy then
+			DrawLine(line, frame, sx * w, (1.0 - sy) * h, dx * w, (1.0 - dy) * h, 32, TAXIROUTE_LINEFACTOR)
 			line:Show()
 		end
 	end
@@ -56,7 +62,7 @@ function AddOn:DrawOneHopLines()
 		for i = 1, numNodes do
 			nodeType = TaxiNodeGetType(i)
 			---@diagnostic disable-next-line: redundant-parameter
-			if (nodeType == "REACHABLE") and TaxiIsDirectFlight(i) then
+			if (nodeType == "REACHABLE") and (not TaxiIsDirectFlight or TaxiIsDirectFlight(i)) then
 				numSingleHops = numSingleHops + 1
 				numLines = numLines + 1
 				line = AddOn:GetRouteLine(numLines)
