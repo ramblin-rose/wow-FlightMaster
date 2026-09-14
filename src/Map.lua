@@ -45,3 +45,43 @@ function AddOn:GetPlayerMapPosition()
 		return C_Map.GetPlayerMapPosition(mapID, "player")
 	end
 end
+--------------------------------
+function AddOn:GetPositionXY(position)
+	if not position then
+		return
+	end
+	if position.GetXY then
+		return position:GetXY()
+	end
+	return position.x, position.y
+end
+--------------------------------
+function AddOn:ConvertMapPosition(position, fromMapID, toMapID)
+	if not position or not fromMapID or not toMapID then
+		return
+	end
+	if fromMapID == toMapID then
+		return position
+	end
+	if not C_Map.GetWorldPosFromMapPos or not C_Map.GetMapPosFromWorldPos then
+		return
+	end
+
+	local x, y = AddOn:GetPositionXY(position)
+	if not x or not y then
+		return
+	end
+
+	local fromPos = (CreateVector2D and CreateVector2D(x, y)) or { x = x, y = y }
+	local continentID, worldPos = C_Map.GetWorldPosFromMapPos(fromMapID, fromPos)
+	if not continentID or not worldPos then
+		return
+	end
+	local _, mapPos = C_Map.GetMapPosFromWorldPos(continentID, worldPos, toMapID)
+	return mapPos
+end
+--------------------------------
+function AddOn:IsPositionOnMap(position)
+	local x, y = AddOn:GetPositionXY(position)
+	return x and y and x >= -0.05 and x <= 1.05 and y >= -0.05 and y <= 1.05
+end

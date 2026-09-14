@@ -68,6 +68,7 @@ end
 function AddOn:OnTaxiMapOpened(...)
 	-- grab flight master context
 	AddOn.flightMasterContext = UnitName("npc") or UnitName("target")
+	AddOn.currentTaxiNode = nil
 	local hook = AddOn.hooks[TaxiFrame]
 	if not hook or hook.OnHide == nil then
 		AddOn:RawHookScript(TaxiFrame, "OnHide", "OnHideTaxiFrame")
@@ -111,6 +112,8 @@ function AddOn:OnHideWorldMapFrame()
 				AddOn:Unhook(TaxiFrame, "OnHide")
 			end
 			AddOn.flightMasterContext = nil
+			AddOn.currentTaxiNode = nil
+			AddOn:HideRouteLines()
 		end
 	end, 0)
 end

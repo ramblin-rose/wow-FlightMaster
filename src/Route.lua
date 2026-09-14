@@ -38,23 +38,39 @@ function AddOn:PerformRouteLineDraw(line, taxiNodeIndex, routeNodeIndex, frame)
 
 	if src and dst then
 		local w, h = AddOn:GetFrameDim(frame)
-		src = src.position
-		dst = dst.position
-		local sx, sy, dx, dy
-		if src and src.GetXY then
-			sx, sy = src:GetXY()
-		elseif src then
-			sx, sy = src.x, src.y
-		end
-		if dst and dst.GetXY then
-			dx, dy = dst:GetXY()
-		elseif dst then
-			dx, dy = dst.x, dst.y
-		end
-		if sx and sy and dx and dy then
+		local sx, sy = AddOn:GetPositionXY(src.position)
+		local dx, dy = AddOn:GetPositionXY(dst.position)
+		if sx and sy and dx and dy and w and h and w > 0 and h > 0 then
 			DrawLine(line, frame, sx * w, (1.0 - sy) * h, dx * w, (1.0 - dy) * h, 32, TAXIROUTE_LINEFACTOR)
 			line:Show()
 		end
+	end
+end
+--------------------------------
+function AddOn:DrawHighlightedRoute(taxiNodeIndex)
+	if not taxiNodeIndex or taxiNodeIndex < 1 or taxiNodeIndex > NumTaxiNodes() then
+		return
+	end
+	if TaxiNodeGetType(taxiNodeIndex) ~= "REACHABLE" then
+		return
+	end
+
+	local numRoutes = GetNumRoutes(taxiNodeIndex)
+	if not numRoutes or numRoutes < 1 then
+		return
+	end
+
+	local frame = AddOn.lineCanvas or AddOn.frameRouteMap
+	AddOn:HideRouteLines()
+	for i = 1, numRoutes do
+		local line = AddOn:GetRouteLine(i)
+		if line then
+			AddOn:PerformRouteLineDraw(line, taxiNodeIndex, i, frame)
+		end
+	end
+	local routeLines = AddOn.routeLines
+	for i = numRoutes + 1, #routeLines do
+		AddOn:GetRouteLine(i):Hide()
 	end
 end
 --------------------------------
