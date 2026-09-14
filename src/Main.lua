@@ -90,6 +90,28 @@ function AddOn:OnShowWorldMapFrame()
 		AddOn.Timer:CancelTimer(AddOn.pendingTaxiRelease)
 		AddOn.pendingTaxiRelease = nil
 	end
+	-- Maximize/minimize hides then shows the panel. After that layout,
+	-- Blizzard resets to the player's zone (e.g. Shattrath). Restore the
+	-- continent taxi view on the next frame so it wins that reset.
+	if AddOn.flightMasterContext then
+		AddOn:RestoreTaxiContinentMap()
+	end
+end
+--------------------------------
+function AddOn:RestoreTaxiContinentMap()
+	if AddOn.pendingContinentRestore then
+		AddOn.Timer:CancelTimer(AddOn.pendingContinentRestore)
+	end
+	AddOn.pendingContinentRestore = AddOn.Timer:ScheduleTimer(function()
+		AddOn.pendingContinentRestore = nil
+		if not AddOn.flightMasterContext or not WorldMapFrame:IsShown() then
+			return
+		end
+		local continentMapID = AddOn:GetPlayerContinentMapID()
+		if continentMapID and WorldMapFrame:GetMapID() ~= continentMapID then
+			WorldMapFrame:SetMapID(continentMapID)
+		end
+	end, 0)
 end
 --------------------------------
 function AddOn:OnHideWorldMapFrame()
@@ -106,6 +128,10 @@ function AddOn:OnHideWorldMapFrame()
 		end
 		AddOn:EnableDataProviderRefresh(false)
 		AddOn:EnableFlightMasterInteractionDistance(false)
+		if AddOn.pendingContinentRestore then
+			AddOn.Timer:CancelTimer(AddOn.pendingContinentRestore)
+			AddOn.pendingContinentRestore = nil
+		end
 		if AddOn.flightMasterContext then
 			if AddOn.hooks[TaxiFrame] and AddOn.hooks[TaxiFrame].OnHide then
 				AddOn.hooks[TaxiFrame]:OnHide(TaxiFrame)
