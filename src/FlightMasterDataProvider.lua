@@ -4,12 +4,16 @@ FlightMasterPointDataProviderMixin = CreateFromMixins(MapCanvasDataProviderMixin
 function AddOn:InitFlightMasterDataProvider()
 	AddOn.factionGroup = UnitFactionGroup("player")
 	AddOn.taxiNodePositions = {}
+	AddOn.currentTaxiNode = nil
 	AddOn.showUnknownPoints = false
 	AddOn.dataProvider = CreateFromMixins(FlightMasterPointDataProviderMixin)
 	AddOn.pointPinTemplate = "FlightMasterPointPinTemplate"
 	AddOn.pinPools = AddOn.pinPools or {}
 	AddOn.pinPools[AddOn.pointPinTemplate] =
-		CreateFramePool("Button", WorldMapFrame.scrollContainer or WorldMapFrame, AddOn.pointPinTemplate)
+		CreateFramePool("Button", WorldMapFrame.ScrollContainer or WorldMapFrame.scrollContainer or WorldMapFrame, AddOn.pointPinTemplate)
+	if WorldMapFrame.SetPinTemplateType then
+		WorldMapFrame:SetPinTemplateType(AddOn.pointPinTemplate, "Button")
+	end
 	-- Determine if player is a class that shapechanges - druid of shaman - and setup the cancelform feature.
 	local _, _, classId = UnitClass("player")
 	AddOn.isPlayerShapeShifter = classId == 11 or classId == 7
@@ -25,18 +29,6 @@ function FlightMasterPointDataProviderMixin:RemoveAllData()
 	self:GetMap():RemoveAllPinsByTemplate(AddOn.pointPinTemplate)
 	AddOn:HideRouteLines()
 	wipe(AddOn.taxiNodePositions)
-	AddOn.currentTaxiNode = nil
-end
---------------------------------
-function FlightMasterPointDataProviderMixin:GetNamedMapTaxiNodes(mapID)
-	local mapTaxiNodes = C_TaxiMap.GetAllTaxiNodes(mapID)
-	local taxiNodeNameMap = {}
-
-	for _, e in ipairs(mapTaxiNodes) do
-		taxiNodeNameMap[e.name] = e
-	end
-
-	return taxiNodeNameMap, #mapTaxiNodes
 end
 --------------------------------
 local function shortTaxiName(name)
@@ -44,26 +36,90 @@ local function shortTaxiName(name)
 		return ""
 	end
 	local short = name:match("^([^,]+)") or name
-	return short:gsub("^%s+", ""):gsub("%s+$", ""):lower()
+	short = short:gsub("^%s+", ""):gsub("%s+$", ""):lower()
+	return short
 end
 --------------------------------
-function FlightMasterPointDataProviderMixin:FindNamedMapTaxiNode(taxiNodeNameMap, name)
-	if not name then
+local function namesLooselyEqual(a, b)
+	if a == b then
+		return true
+	end
+	if #a < 5 or #b < 5 then
+		return false
+	end
+	return a:sub(1, #b) == b or b:sub(1, #a) == a
+end
+--------------------------------
+local function ingestTaxiNodes(nodes, bySlot, byName, byShort, hasSlot)
+	if type(nodes) ~= "table" then
 		return
 	end
-	local taxiNode = taxiNodeNameMap[name]
-	if taxiNode then
-		return taxiNode
-	end
-	local short = shortTaxiName(name)
-	if short == "" then
-		return
-	end
-	for nodeName, node in pairs(taxiNodeNameMap) do
-		if shortTaxiName(nodeName) == short then
-			return node
+	for _, node in ipairs(nodes) do
+		if hasSlot and node.slotIndex and node.slotIndex > 0 then
+			bySlot[node.slotIndex] = node
+		end
+		if node.name then
+			byName[node.name] = byName[node.name] or node
+			local short = shortTaxiName(node.name)
+			if short ~= "" then
+				byShort[short] = byShort[short] or node
+			end
 		end
 	end
+end
+--------------------------------
+function FlightMasterPointDataProviderMixin:GetMapTaxiNodeLookup(mapID)
+	local bySlot, byName, byShort = {}, {}, {}
+	if mapID and C_TaxiMap then
+		-- Zone-native positions first so in-zone pins stay on the zone map.
+		-- GetAllTaxiNodes then fills hop endpoints that are off this map.
+		if C_TaxiMap.GetTaxiNodesForMap then
+			ingestTaxiNodes(C_TaxiMap.GetTaxiNodesForMap(mapID), bySlot, byName, byShort, false)
+		end
+		if C_TaxiMap.GetAllTaxiNodes then
+			ingestTaxiNodes(C_TaxiMap.GetAllTaxiNodes(mapID), bySlot, byName, byShort, true)
+		end
+	end
+	return bySlot, byName, byShort
+end
+--------------------------------
+function FlightMasterPointDataProviderMixin:FindTaxiNode(slotIndex, name, bySlot, byName, byShort)
+	-- C_TaxiMap.slotIndex is not the live taxi-session index, so name matching
+	-- must win. Slot is only a last resort when names cannot be aligned.
+	if name and byName[name] then
+		return byName[name]
+	end
+	local short = shortTaxiName(name)
+	if short ~= "" then
+		if byShort[short] then
+			return byShort[short]
+		end
+		for key, node in pairs(byShort) do
+			if namesLooselyEqual(short, key) then
+				return node
+			end
+		end
+	end
+	if slotIndex and bySlot[slotIndex] then
+		return bySlot[slotIndex]
+	end
+end
+--------------------------------
+local function copyTaxiNode(node)
+	local copy = {}
+	for key, value in pairs(node) do
+		copy[key] = value
+	end
+	return copy
+end
+--------------------------------
+local function taxiNodeTypeToState(nodeType)
+	if nodeType == "CURRENT" then
+		return Enum.FlightPathState.Current
+	elseif nodeType == "REACHABLE" then
+		return Enum.FlightPathState.Reachable
+	end
+	return Enum.FlightPathState.Unreachable
 end
 --------------------------------
 function FlightMasterPointDataProviderMixin:GetSecureTaxiMacroFormatString()
@@ -85,35 +141,66 @@ function FlightMasterPointDataProviderMixin:RefreshAllData(fromOnShow)
 		local playerContinentMapID = AddOn:GetPlayerContinentMapID()
 
 		AddOn.mapInfo = C_Map.GetMapInfo(self:GetMap():GetMapID())
+		if not AddOn.mapInfo then
+			return
+		end
 		AddOn.frameRouteMap:SetAllPoints()
-		-- mapInfo.mapType 2 (continent) must match player continent;
-		-- mapInfo.mayType 3 (zone) must be a zone in player continent;
+		-- continent must match player continent;
+		-- zone (or other child map) must belong to player continent;
 		-- ignore otherwise.
-		local isValidZoneMap = AddOn.mapInfo.mapType == 3
+		local continentMapType = AddOn:GetContinentMapType()
+		local isValidZoneMap = AddOn.mapInfo.mapType > continentMapType
 			and (AddOn:GetNearestContinentID(AddOn.mapInfo.mapID) == playerContinentMapID)
 
-		local isValidContinentMap = AddOn.mapInfo.mapType == 2 and AddOn.mapInfo.mapID == playerContinentMapID
+		local isValidContinentMap = AddOn.mapInfo.mapType == continentMapType
+			and AddOn.mapInfo.mapID == playerContinentMapID
 
 		if isValidZoneMap or isValidContinentMap then
 			local numNodes = NumTaxiNodes()
 			local name, pin, taxiNode, sessionType
-			local taxiNodeNameMap = self:GetNamedMapTaxiNodes(AddOn.mapInfo.mapID)
+			local bySlot, byName, byShort = self:GetMapTaxiNodeLookup(AddOn.mapInfo.mapID)
+			local continentBySlot, continentByName, continentByShort
+			if isValidZoneMap then
+				continentBySlot, continentByName, continentByShort =
+					self:GetMapTaxiNodeLookup(playerContinentMapID)
+			end
 			local shouldShowUnknown = AddOn:GetShowUnknownFlightMasters()
 			local secureTaxiMacroFormatString = self:GetSecureTaxiMacroFormatString()
 			for i = 1, numNodes do
 				name = TaxiNodeName(i)
-				taxiNode = self:FindNamedMapTaxiNode(taxiNodeNameMap, name)
+				taxiNode = self:FindTaxiNode(i, name, bySlot, byName, byShort)
+				local fromContinent = false
+				if not taxiNode and continentByName then
+					local continentNode =
+						self:FindTaxiNode(i, name, continentBySlot, continentByName, continentByShort)
+					if continentNode then
+						local converted = AddOn:ConvertMapPosition(
+							continentNode.position,
+							playerContinentMapID,
+							AddOn.mapInfo.mapID
+						)
+						if converted then
+							taxiNode = copyTaxiNode(continentNode)
+							taxiNode.position = converted
+							fromContinent = true
+						end
+					end
+				end
 				sessionType = TaxiNodeGetType(i)
 
 				-- Always keep hop endpoints, including TBC DISTANT nodes.
 				-- C_TaxiMap.slotIndex is not the live taxi-session index.
 				if taxiNode then
 					taxiNode.slotIndex = i
+					if taxiNode.state == nil then
+						taxiNode.state = taxiNodeTypeToState(sessionType)
+					end
 					AddOn.taxiNodePositions[i] = taxiNode
 				end
 
 				local isSessionFlyable = sessionType == "CURRENT" or sessionType == "REACHABLE"
 				local shouldShowPin = taxiNode
+					and (not fromContinent or AddOn:IsPositionOnMap(taxiNode.position))
 					and (
 						isSessionFlyable
 						or taxiNode.state ~= Enum.FlightPathState.Unreachable
@@ -136,7 +223,9 @@ function FlightMasterPointDataProviderMixin:RefreshAllData(fromOnShow)
 					end
 				end
 			end
-			if AddOn.mapInfo.mapType == 2 then
+			if AddOn.currentTaxiNode then
+				AddOn:DrawHighlightedRoute(AddOn.currentTaxiNode)
+			elseif isValidContinentMap then
 				AddOn:DrawOneHopLines()
 			end
 		end
@@ -216,27 +305,23 @@ function FlightMasterPointPinMixin:OnMouseEnter()
 		return
 	end
 
-	local numRoutes = GetNumRoutes(index)
-	local isZone = AddOn.mapInfo and AddOn.mapInfo.mapType ~= 2
+	local continentMapType = AddOn.GetContinentMapType and AddOn:GetContinentMapType() or 2
+	local isZone = AddOn.mapInfo and AddOn.mapInfo.mapType ~= continentMapType
 	local sessionType = TaxiNodeGetType(index)
-	local line
 
 	AddOn:HideRouteLines()
+	if sessionType == "REACHABLE" then
+		AddOn.currentTaxiNode = index
+	else
+		AddOn.currentTaxiNode = nil
+	end
 
 	GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
 	GameTooltip:AddLine(TaxiNodeName(index), nil, nil, nil, true)
 
 	if sessionType == "REACHABLE" then
 		SetTooltipMoney(GameTooltip, TaxiNodeCost(index))
-		for i = 1, numRoutes do
-			line = AddOn:GetRouteLine(i)
-			if i <= numRoutes then
-				AddOn:PerformRouteLineDraw(line, index, i, AddOn.lineCanvas)
-				line:Show()
-			else
-				line:Hide()
-			end
-		end
+		AddOn:DrawHighlightedRoute(index)
 	elseif sessionType == "DISTANT" or sessionType == "NONE" then
 		GameTooltip:AddLine(ERR_TAXINOPATHS, 250, 250, 250, true)
 	elseif sessionType == "CURRENT" and not isZone then

@@ -38,16 +38,49 @@ function AddOn:OnHideTaxiFrame(...)
 	-- Once the WorldMapFrame is closed the TaxiFrame event is invoked and this hook removed.
 end
 --------------------------------
+local function getFlightMasterUnit()
+	local context = AddOn.flightMasterContext
+	if not context then
+		return
+	end
+	-- Classic taxi UI tracks the flight master as "npc"; "target" is cleared when
+	-- the fullscreen world map blacks out the 3D world.
+	if UnitExists("npc") and UnitName("npc") == context then
+		return "npc"
+	end
+	if UnitExists("target") and UnitName("target") == context then
+		return "target"
+	end
+end
+--------------------------------
+local function isFlightMasterInRange()
+	local unit = getFlightMasterUnit()
+	if not unit then
+		return false
+	end
+	local ok, inRange = pcall(CheckInteractDistance, unit, 3)
+	if not ok then
+		return true
+	end
+	return not not inRange
+end
+--------------------------------
 function AddOn:OnTaxiMapOpened(...)
 	-- grab flight master context
-	AddOn.flightMasterContext = UnitName("target")
+	AddOn.flightMasterContext = UnitName("npc") or UnitName("target")
+	AddOn.currentTaxiNode = nil
 	local hook = AddOn.hooks[TaxiFrame]
 	if not hook or hook.OnHide == nil then
 		AddOn:RawHookScript(TaxiFrame, "OnHide", "OnHideTaxiFrame")
 	end
 
-	ToggleWorldMap()
-	WorldMapFrame:SetMapID(AddOn:GetPlayerContinentMapID())
+	if not WorldMapFrame:IsShown() then
+		ToggleWorldMap()
+	end
+	local continentMapID = AddOn:GetPlayerContinentMapID()
+	if continentMapID then
+		WorldMapFrame:SetMapID(continentMapID)
+	end
 	AddOn:EnableDataProviderRefresh(true)
 	AddOn:EnableFlightMasterInteractionDistance(true)
 end
@@ -79,6 +112,8 @@ function AddOn:OnHideWorldMapFrame()
 				AddOn:Unhook(TaxiFrame, "OnHide")
 			end
 			AddOn.flightMasterContext = nil
+			AddOn.currentTaxiNode = nil
+			AddOn:HideRouteLines()
 		end
 	end, 0)
 end
@@ -117,7 +152,7 @@ function AddOn:EnableFlightMasterInteractionDistance(enable)
 	elseif AddOn.flightMasterMonitor == nil then
 		local timeOutMs = 0.25
 		AddOn.flightMasterMonitor = AddOn.Timer:ScheduleRepeatingTimer(function()
-			if not CheckInteractDistance("target", 3) or UnitName("target") ~= AddOn.flightMasterContext then
+			if not isFlightMasterInRange() then
 				AddOn.Timer:CancelTimer(AddOn.flightMasterMonitor)
 				AddOn.flightMasterMonitor = nil
 				if WorldMapFrame:IsVisible() then

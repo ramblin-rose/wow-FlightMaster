@@ -1,5 +1,4 @@
 import { series, watch, src, dest } from "gulp";
-import newer from "gulp-newer";
 import path from "path";
 import replace from "gulp-replace";
 import touch from "gulp-touch-cmd";
@@ -120,17 +119,40 @@ function dev(_) {
   );
 }
 //////////////////////////////////
-function addons(cb) {
-  const path = process.env.WOW_ADDON_DEST_FOLDER;
-  const output =
-    path.charAt(path.length - 1) == ";" ?
-      path.substring(0, path.length - 1)
-    : path;
-  console.log("Copying build to " + output);
-  return src("build/**/*", { ignoreInitial: false, encoding: false })
-    .pipe(newer(output))
-    .pipe(dest(output))
-    .pipe(touch());
+function streamDone(stream) {
+  return new Promise((resolve, reject) => {
+    stream.once("error", reject);
+    stream.once("finish", resolve);
+    stream.once("end", resolve);
+  });
+}
+
+async function addons() {
+  const wowRoot = (process.env.WOW_FOLDER ?? "").replace(/[;\\/]+$/, "");
+  if (!wowRoot) {
+    throw new Error("WOW_FOLDER is not set");
+  }
+
+  const wowFlavors = ["_anniversary_", "_classic_era_", "_classic_"];
+  const addonBuild = path.join("build", util.name);
+  const glob = `${addonBuild.replaceAll("\\", "/")}/**/*`;
+
+  for (const flavor of wowFlavors) {
+    const output = path.join(
+      wowRoot,
+      flavor,
+      "Interface",
+      "AddOns",
+      util.name,
+    );
+    console.log("Copying build to " + output);
+    deleteSync([output.replaceAll("\\", "/")], { force: true });
+    await streamDone(
+      src(glob, { encoding: false, base: addonBuild })
+        .pipe(dest(output))
+        .pipe(touch()),
+    );
+  }
 }
 //////////////////////////////////
 export default dev;

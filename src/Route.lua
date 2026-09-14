@@ -38,17 +38,39 @@ function AddOn:PerformRouteLineDraw(line, taxiNodeIndex, routeNodeIndex, frame)
 
 	if src and dst then
 		local w, h = AddOn:GetFrameDim(frame)
-		src = src.position
-		dst = dst.position
-		if src and dst then
-			local sx, sy, dx, dy
-			sx = src.x * w
-			sy = (1.0 - src.y) * h
-			dx = dst.x * w
-			dy = (1.0 - dst.y) * h
-			DrawLine(line, frame, sx, sy, dx, dy, 32, TAXIROUTE_LINEFACTOR)
+		local sx, sy = AddOn:GetPositionXY(src.position)
+		local dx, dy = AddOn:GetPositionXY(dst.position)
+		if sx and sy and dx and dy and w and h and w > 0 and h > 0 then
+			DrawLine(line, frame, sx * w, (1.0 - sy) * h, dx * w, (1.0 - dy) * h, 32, TAXIROUTE_LINEFACTOR)
 			line:Show()
 		end
+	end
+end
+--------------------------------
+function AddOn:DrawHighlightedRoute(taxiNodeIndex)
+	if not taxiNodeIndex or taxiNodeIndex < 1 or taxiNodeIndex > NumTaxiNodes() then
+		return
+	end
+	if TaxiNodeGetType(taxiNodeIndex) ~= "REACHABLE" then
+		return
+	end
+
+	local numRoutes = GetNumRoutes(taxiNodeIndex)
+	if not numRoutes or numRoutes < 1 then
+		return
+	end
+
+	local frame = AddOn.lineCanvas or AddOn.frameRouteMap
+	AddOn:HideRouteLines()
+	for i = 1, numRoutes do
+		local line = AddOn:GetRouteLine(i)
+		if line then
+			AddOn:PerformRouteLineDraw(line, taxiNodeIndex, i, frame)
+		end
+	end
+	local routeLines = AddOn.routeLines
+	for i = numRoutes + 1, #routeLines do
+		AddOn:GetRouteLine(i):Hide()
 	end
 end
 --------------------------------
@@ -62,7 +84,7 @@ function AddOn:DrawOneHopLines()
 
 		for i = 1, numNodes do
 			nodeType = TaxiNodeGetType(i)
-			-- Stock TBC uses GetNumRoutes == 1; TaxiIsDirectFlight is later-only.
+			-- Stock Classic/TBC uses GetNumRoutes == 1; TaxiIsDirectFlight is later-only.
 			if nodeType == "REACHABLE" and GetNumRoutes(i) == 1 then
 				numSingleHops = numSingleHops + 1
 				numLines = numLines + 1
