@@ -321,6 +321,7 @@ function FlightMasterPointPinMixin:OnMouseEnter()
 
 	if sessionType == "REACHABLE" then
 		SetTooltipMoney(GameTooltip, TaxiNodeCost(index))
+		AddOn:AddFlightTimeTooltipLine(index)
 		AddOn:DrawHighlightedRoute(index)
 	elseif sessionType == "DISTANT" or sessionType == "NONE" then
 		GameTooltip:AddLine(ERR_TAXINOPATHS, 250, 250, 250, true)
