@@ -6,6 +6,9 @@ local function optIndex()
 	optn = optn + 1
 	return optn
 end
+
+AddOn.NO_ARRIVAL_SOUND = "NO_ARRIVAL_SOUND"
+
 local options = {
 	name = L.addOnName,
 
@@ -76,6 +79,34 @@ local options = {
 			end,
 			get = function(info)
 				return AddOn:GetAutoCancelShapeShift()
+			end,
+		},
+		arrivalSound = {
+			order = optIndex(),
+			name = L.configArrivalSound,
+			desc = "",
+			type = "select",
+			values = {
+				[AddOn.NO_ARRIVAL_SOUND] = L.oggNone,
+				["assets/arrived.ogg"] = L.oggArrive,
+				["assets/dang.ogg"] = L.oggDang,
+				["assets/frenzy.ogg"] = L.oggFrenzy,
+				["assets/joyous.ogg"] = L.oggJoyous,
+				["assets/light.ogg"] = L.oggLight,
+				["assets/oring.ogg"] = L.oggOring,
+				["assets/ringo.ogg"] = L.oggRingo,
+				["assets/serious.ogg"] = L.oggSerious,
+				["assets/smile.ogg"] = L.oggSmile,
+			},
+			disabled = function()
+				return false
+			end,
+			set = function(info, val)
+				AddOn:SetArrivalSound(val)
+				AddOn:PlayArrivalSound()
+			end,
+			get = function(info)
+				return AddOn:GetArrivalSound()
 			end,
 		},
 		flightTimes = {
@@ -477,6 +508,7 @@ local dbDefaults = {
 		autoCancelShapeShift = true,
 		showFlightTimes = true,
 		showFlightTimerBar = true,
+		arrivalSound = AddOn.NO_ARRIVAL_SOUND,
 		flightTimerBarStyle = {
 			colorMode = "solid",
 			timeDisplay = "remaining",
@@ -533,6 +565,7 @@ function AddOn:SetDefaultOptions()
 	self:SetShowUnknownFlightMasters(AddOn.db.global.showUnknownFlightMasters)
 	self:SetPoiDimension(14)
 	self:SetAutoCancelShapeShift(AddOn.db.global.autoCancelShapeShift)
+	self:SetArrivalSound(AddOn.db.global.arrivalSound)
 	self:SetShowFlightTimes(true)
 	self:SetShowFlightTimerBar(true)
 	self:ResetFlightTimerBarStyle()
@@ -578,6 +611,23 @@ end
 --------------------------------
 function AddOn:GetAutoCancelShapeShift()
 	return AddOn.db.global.autoCancelShapeShift
+end
+--------------------------------
+function AddOn:SetArrivalSound(val)
+	AddOn.db.global.arrivalSound = val
+	if AddOn.RefreshFlightTimerBarPreview then
+		AddOn:UpdateFlightTimerSoundButton()
+	end
+end
+--------------------------------
+function AddOn:GetArrivalSound()
+	return AddOn.db.global.arrivalSound
+end
+--------------------------------
+function AddOn:PlayArrivalSound()
+	if AddOn.db.global.arrivalSound ~= AddOn.NO_ARRIVAL_SOUND then
+		PlaySoundFile("Interface\\AddOns\\" .. AddOn.name .. "\\" .. AddOn.db.global.arrivalSound, "MASTER")
+	end
 end
 --------------------------------
 function AddOn:SetShowFlightTimes(val)

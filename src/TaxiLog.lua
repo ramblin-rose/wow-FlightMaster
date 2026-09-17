@@ -243,12 +243,7 @@ function AddOn:AddFlightTimeTooltipLine(destSlot)
 		if estimated then
 			formatted = "~" .. formatted
 		end
-		GameTooltip:AddLine(
-			"|cffffd100" .. L.flightTimeLabel .. "|r |cffffffff" .. formatted .. "|r",
-			1,
-			1,
-			1
-		)
+		GameTooltip:AddLine("|cffffd100" .. L.flightTimeLabel .. "|r |cffffffff" .. formatted .. "|r", 1, 1, 1)
 		return
 	end
 	GameTooltip:AddLine("|cff808080" .. L.flightTimeLabel .. " " .. L.flightTimeUnknown .. "|r", 0.5, 0.5, 0.5)
@@ -341,7 +336,16 @@ local function confirmTakeoff()
 		AddOn:RegisterEvent("PLAYER_CONTROL_GAINED", "OnFlightTimeControlGained")
 	end
 	persistActiveFlight()
-	AddOn:SendMessage(AddOn.Message.TAXI_START, pending.originID, pending.destID, pending.duration, pending.destName, pending.estimated, pending.arrivalClock, pending.numHops)
+	AddOn:SendMessage(
+		AddOn.Message.TAXI_START,
+		pending.originID,
+		pending.destID,
+		pending.duration,
+		pending.destName,
+		pending.estimated,
+		pending.arrivalClock,
+		pending.numHops
+	)
 end
 --------------------------------
 local function startFlightTimeWatch()
@@ -370,6 +374,13 @@ local function startFlightTimeWatch()
 end
 --------------------------------
 function AddOn:OnTakeTaxiNode(index)
+	-- TODO we should show an inflight control so the early landing and sound control are still available.
+	-- we could do this by altering the flight destination text widget to have all borders but be be one
+	-- layer below the progress frame, so that when the progress frame is hidden in this state.
+	-- OR, when the flight time is unknown create loop animation of the progress bar with the text
+	-- "Learning about this flight path
+	-- TODO Sound Control:The user should be able to toggle arrival sound on or off, its initial state being
+	-- the complement of the config settings.  If user has no sound selected then choose the most obnoxious sound.
 	if not AddOn:GetEnabled() or not AddOn:GetShowFlightTimes() then
 		return
 	end
@@ -414,6 +425,7 @@ end
 --------------------------------
 function AddOn:OnFlightTimeControlGained()
 	finishFlightTimeSample()
+	AddOn:PlayArrivalSound()
 end
 --------------------------------
 local function invalidateFlightTimeSample()

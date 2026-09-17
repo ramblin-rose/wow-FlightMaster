@@ -18,6 +18,9 @@ local BACKDROP = {
 	edgeSize = EDGE_SIZE,
 	insets = { left = 4, right = 4, top = 4, bottom = 4 },
 }
+
+local SOUND_ON_TEXTURE = "Interface\\AddOns\\" .. AddOn.name .. "\\assets\\green_glow.png"
+local SOUND_OFF_TEXTURE = "Interface\\AddOns\\" .. AddOn.name .. "\\assets\\red_glow.png"
 --------------------------------
 local function isFlightTimerBarEnabled()
 	return AddOn:GetEnabled() and AddOn:GetShowFlightTimes() and AddOn:GetShowFlightTimerBar()
@@ -162,9 +165,7 @@ end
 local POSITION_EPSILON = 2
 --------------------------------
 local function scaledCentersNear(x1, y1, x2, y2)
-	return x1 and y1 and x2 and y2
-		and math.abs(x1 - x2) < POSITION_EPSILON
-		and math.abs(y1 - y2) < POSITION_EPSILON
+	return x1 and y1 and x2 and y2 and math.abs(x1 - x2) < POSITION_EPSILON and math.abs(y1 - y2) < POSITION_EPSILON
 end
 --------------------------------
 function AddOn:GetFlightTimerBarScaledCenter()
@@ -257,6 +258,7 @@ function AddOn:IsFlightTimerBarAtOptionsOpenPosition()
 	if not x then
 		return true
 	end
+	---@diagnostic disable-next-line: need-check-nil
 	return scaledCentersNear(x, y, snap.x, snap.y)
 end
 --------------------------------
@@ -495,7 +497,7 @@ function AddOn:LayoutFlightTimerBar()
 	if earlyBtn and earlyBtn:IsShown() then
 		earlyBtn:ClearAllPoints()
 		if headerShown then
-			earlyBtn:SetPoint("BOTTOMRIGHT", clip, "LEFT", -SIDE_ICON_GAP, earlyY)
+			earlyBtn:SetPoint("BOTTOMRIGHT", clip, "LEFT", 0, earlyY)
 		else
 			earlyBtn:SetPoint("BOTTOMRIGHT", barFrame, "TOPLEFT", -SIDE_ICON_GAP, overlap + earlyY)
 		end
@@ -509,7 +511,9 @@ function AddOn:LayoutFlightTimerBar()
 			soundBtn:SetPoint("BOTTOMLEFT", barFrame, "TOPRIGHT", SIDE_ICON_GAP, overlap)
 		end
 		extraRight = math.max(0, headerW / 2 + soundBtn:GetWidth() + SIDE_ICON_GAP - barOuterWidth / 2)
+		-- add a mini icon anchored to the bottom right of the sound button for inflight control over sound
 	end
+
 	frame:SetSize(barOuterWidth + extraLeft + extraRight, headerHeight + barOuterHeight - overlap)
 	barFrame:SetPoint("BOTTOM", frame, "BOTTOM", (extraLeft - extraRight) / 2, 0)
 end
@@ -558,32 +562,41 @@ function AddOn:UpdateFlightTimerEarlyLandingButton()
 		return
 	end
 	local hops = state and tonumber(state.numHops)
-	local show = state
-		and (state.preview or (hops and hops > 1 and UnitOnTaxi("player")))
+	local show = state and (state.preview or (hops and hops > 1 and UnitOnTaxi("player")))
 	if show then
 		btn:Show()
 	else
 		btn:Hide()
 	end
 	AddOn:LayoutFlightTimerBar()
-	AddOn:UpdateFlightTimerSoundButton()
 end
 --------------------------------
+
+function AddOn:ShouldFlightTimerPlayArrivalSound() end
+--------------------------------
+local playSoundOnArrival
 function AddOn:UpdateFlightTimerSoundButton()
 	local btn = AddOn.flightTimerSoundButton
 	if not btn then
 		return
 	end
 	local clip = AddOn.flightTimerHeaderClip
-	local show = AddOn.flightTimerFrame
-		and AddOn.flightTimerFrame:IsShown()
-		and clip
-		and clip:IsShown()
+	local show = AddOn.flightTimerFrame and AddOn.flightTimerFrame:IsShown() and clip and clip:IsShown()
+	playSoundOnArrival = AddOn.db.global.arrivalSound ~= AddOn.NO_ARRIVAL_SOUND
 	if show then
 		btn:Show()
+		local texture = btn.indicator and btn.indicator.texture
+		if texture then
+			if playSoundOnArrival then
+				texture:SetTexture(SOUND_ON_TEXTURE)
+			else
+				texture:SetTexture(SOUND_OFF_TEXTURE)
+			end
+		end
 	else
 		btn:Hide()
 	end
+
 	AddOn:LayoutFlightTimerBar()
 end
 --------------------------------
@@ -622,7 +635,7 @@ function AddOn:EnsureFlightTimerBar()
 	nameText:SetJustifyV("MIDDLE")
 	nameText:SetWordWrap(false)
 	header.nameText = nameText
-
+	-- earlyBtn allows player to interrupt flight and land at next hop if more than one hop exists.
 	local earlyBtn = CreateFrame("Button", nil, frame)
 	earlyBtn:SetSize(28, 28)
 	earlyBtn:SetNormalTexture("Interface\\Vehicles\\UI-Vehicles-Button-Exit-Up")
@@ -644,15 +657,15 @@ function AddOn:EnsureFlightTimerBar()
 	end)
 	earlyBtn:SetScript("OnEnter", function(self)
 		GameTooltip:SetOwner(self, "ANCHOR_TOP")
-		GameTooltip:SetText(AddOn.L.flightTimerEarlyLanding or "Early Landing", 1, 1, 1)
-		GameTooltip:AddLine(AddOn.L.flightTimerEarlyLandingTip or "Land at the next flight master", 0.8, 0.8, 0.8, true)
+		GameTooltip:SetText(AddOn.L.flightTimerEarlyLanding, 1, 1, 1)
+		GameTooltip:AddLine(AddOn.L.flightTimerEarlyLandingTip, 0.8, 0.8, 0.8, true)
 		GameTooltip:Show()
 	end)
 	earlyBtn:SetScript("OnLeave", function()
 		GameTooltip:Hide()
 	end)
 	AddOn.flightTimerEarlyLandingButton = earlyBtn
-
+	-- soundBtn allows user to enable or disable the arrival sound for the current flight only.
 	local soundBtn = CreateFrame("Button", nil, frame)
 	soundBtn:SetSize(20, 20)
 	soundBtn:SetFrameLevel(frame:GetFrameLevel() + 6)
@@ -665,6 +678,15 @@ function AddOn:EnsureFlightTimerBar()
 	speakerOn:SetAllPoints()
 	speakerOn:SetTexture("Interface\\Common\\VoiceChat-On")
 	AddOn.flightTimerSoundButton = soundBtn
+
+	local indicator = CreateFrame("Frame", nil, soundBtn)
+	indicator:SetPoint("CENTER", soundBtn, "BOTTOMRIGHT", -8, 10)
+	indicator:SetSize(16, 16)
+	local texture = indicator:CreateTexture(nil, "ARTWORK")
+	texture:SetAllPoints(indicator)
+	--texture:SetColorTexture(1, 0, 0, 1)
+	indicator.texture = texture
+	soundBtn.indicator = indicator
 
 	local fillClip = CreateFrame("ScrollFrame", nil, barFrame)
 	fillClip:SetPoint("TOPLEFT", BAR_BORDER, -BAR_BORDER)
@@ -771,7 +793,16 @@ function AddOn:HideFlightTimerBar()
 	end
 end
 --------------------------------
-function AddOn:StartFlightTimerBar(originID, destID, duration, destName, estimated, elapsedAlready, arrivalClock, numHops)
+function AddOn:StartFlightTimerBar(
+	originID,
+	destID,
+	duration,
+	destName,
+	estimated,
+	elapsedAlready,
+	arrivalClock,
+	numHops
+)
 	duration = tonumber(duration)
 	if not isFlightTimerBarEnabled() or not duration or duration < 1 then
 		AddOn:HideFlightTimerBar()
@@ -803,6 +834,7 @@ function AddOn:StartFlightTimerBar(originID, destID, duration, destName, estimat
 	AddOn:UpdateFlightTimerBar(0)
 	AddOn:UpdateFlightTimerMover()
 	AddOn:UpdateFlightTimerEarlyLandingButton()
+	AddOn:UpdateFlightTimerSoundButton()
 end
 --------------------------------
 function AddOn:UpdateFlightTimerBar(dt)
@@ -948,7 +980,12 @@ function AddOn:RefreshFlightTimerBarPreview()
 		AddOn:UpdateFlightTimerMover()
 		return
 	end
-	if AddOn.flightTimerState and AddOn.flightTimerState.preview and AddOn.flightTimerFrame and AddOn.flightTimerFrame:IsShown() then
+	if
+		AddOn.flightTimerState
+		and AddOn.flightTimerState.preview
+		and AddOn.flightTimerFrame
+		and AddOn.flightTimerFrame:IsShown()
+	then
 		AddOn:ApplyFlightTimerBarStyle(1 - PREVIEW_ELAPSED / PREVIEW_DURATION)
 		AddOn:UpdateFlightTimerBar(0)
 		AddOn:UpdateFlightTimerMover()
@@ -973,12 +1010,16 @@ function AddOn:RefreshFlightTimerBarPreview()
 	AddOn:UpdateFlightTimerBar(0)
 	AddOn:UpdateFlightTimerMover()
 	AddOn:UpdateFlightTimerEarlyLandingButton()
+	AddOn:UpdateFlightTimerSoundButton()
 end
 --------------------------------
 function AddOn:InitTaxiTimer()
-	AddOn:AddMessageHandler(AddOn.Message.TAXI_START, function(originID, destID, duration, destName, estimated, arrivalClock, numHops)
-		AddOn:StartFlightTimerBar(originID, destID, duration, destName, estimated, nil, arrivalClock, numHops)
-	end)
+	AddOn:AddMessageHandler(
+		AddOn.Message.TAXI_START,
+		function(originID, destID, duration, destName, estimated, arrivalClock, numHops)
+			AddOn:StartFlightTimerBar(originID, destID, duration, destName, estimated, nil, arrivalClock, numHops)
+		end
+	)
 	AddOn:AddMessageHandler(AddOn.Message.TAXI_END, function()
 		AddOn:HideFlightTimerBar()
 		AddOn:RefreshFlightTimerBarPreview()
