@@ -144,22 +144,6 @@ local options = {
 						return AddOn:GetShowFlightTimes()
 					end,
 				},
-				showFlightTimerBar = {
-					order = 2,
-					name = L.configShowFlightTimerBar,
-					desc = L.configShowFlightTimerBarDesc,
-					type = "toggle",
-					width = "double",
-					disabled = function()
-						return not AddOn:GetEnabled() or not AddOn:GetShowFlightTimes()
-					end,
-					set = function(info, val)
-						AddOn:SetShowFlightTimerBar(val)
-					end,
-					get = function(info)
-						return AddOn:GetShowFlightTimerBar()
-					end,
-				},
 				barAppearance = {
 					order = 3,
 					type = "header",
@@ -177,7 +161,6 @@ local options = {
 					disabled = function()
 						return not AddOn:GetEnabled()
 							or not AddOn:GetShowFlightTimes()
-							or not AddOn:GetShowFlightTimerBar()
 					end,
 					set = function(info, val)
 						AddOn:SetFlightTimerBarStyleValue("timeDisplay", val)
@@ -199,7 +182,6 @@ local options = {
 					disabled = function()
 						return not AddOn:GetEnabled()
 							or not AddOn:GetShowFlightTimes()
-							or not AddOn:GetShowFlightTimerBar()
 					end,
 					set = function(info, val)
 						AddOn:SetFlightTimerBarStyleValue("colorMode", val)
@@ -219,7 +201,6 @@ local options = {
 					disabled = function()
 						return not AddOn:GetEnabled()
 							or not AddOn:GetShowFlightTimes()
-							or not AddOn:GetShowFlightTimerBar()
 					end,
 					set = function(info, r, g, b, a)
 						AddOn:SetFlightTimerBarStyleValue("bar", { r, g, b, a or 1 })
@@ -240,7 +221,6 @@ local options = {
 					disabled = function()
 						return not AddOn:GetEnabled()
 							or not AddOn:GetShowFlightTimes()
-							or not AddOn:GetShowFlightTimerBar()
 					end,
 					set = function(info, r, g, b, a)
 						AddOn:SetFlightTimerBarStyleValue("gradientFrom", { r, g, b, a or 1 })
@@ -261,7 +241,6 @@ local options = {
 					disabled = function()
 						return not AddOn:GetEnabled()
 							or not AddOn:GetShowFlightTimes()
-							or not AddOn:GetShowFlightTimerBar()
 					end,
 					set = function(info, r, g, b, a)
 						AddOn:SetFlightTimerBarStyleValue("gradientTo", { r, g, b, a or 1 })
@@ -284,7 +263,6 @@ local options = {
 					disabled = function()
 						return not AddOn:GetEnabled()
 							or not AddOn:GetShowFlightTimes()
-							or not AddOn:GetShowFlightTimerBar()
 					end,
 					set = function(info, val)
 						AddOn:SetFlightTimerBarStyleValue("texture", val)
@@ -301,7 +279,6 @@ local options = {
 					disabled = function()
 						return not AddOn:GetEnabled()
 							or not AddOn:GetShowFlightTimes()
-							or not AddOn:GetShowFlightTimerBar()
 					end,
 					set = function(info, r, g, b, a)
 						AddOn:SetFlightTimerBarStyleValue("background", { r, g, b, a or 1 })
@@ -319,7 +296,6 @@ local options = {
 					disabled = function()
 						return not AddOn:GetEnabled()
 							or not AddOn:GetShowFlightTimes()
-							or not AddOn:GetShowFlightTimerBar()
 					end,
 					set = function(info, r, g, b, a)
 						AddOn:SetFlightTimerBarStyleValue("border", { r, g, b, a or 1 })
@@ -337,7 +313,6 @@ local options = {
 					disabled = function()
 						return not AddOn:GetEnabled()
 							or not AddOn:GetShowFlightTimes()
-							or not AddOn:GetShowFlightTimerBar()
 					end,
 					set = function(info, r, g, b, a)
 						AddOn:SetFlightTimerBarStyleValue("timeText", { r, g, b, a or 1 })
@@ -355,7 +330,6 @@ local options = {
 					disabled = function()
 						return not AddOn:GetEnabled()
 							or not AddOn:GetShowFlightTimes()
-							or not AddOn:GetShowFlightTimerBar()
 					end,
 					set = function(info, r, g, b, a)
 						AddOn:SetFlightTimerBarStyleValue("nameText", { r, g, b, a or 1 })
@@ -380,7 +354,6 @@ local options = {
 							disabled = function()
 								return not AddOn:GetEnabled()
 									or not AddOn:GetShowFlightTimes()
-									or not AddOn:GetShowFlightTimerBar()
 							end,
 							func = function()
 								AddOn:ResetFlightTimerBarStyle()
@@ -396,7 +369,6 @@ local options = {
 								if
 									not AddOn:GetEnabled()
 									or not AddOn:GetShowFlightTimes()
-									or not AddOn:GetShowFlightTimerBar()
 								then
 									return true
 								end
@@ -424,7 +396,6 @@ local options = {
 							disabled = function()
 								return not AddOn:GetEnabled()
 									or not AddOn:GetShowFlightTimes()
-									or not AddOn:GetShowFlightTimerBar()
 									or AddOn.flightTimerMoving
 							end,
 							func = function()
@@ -454,7 +425,6 @@ local options = {
 								if
 									not AddOn:GetEnabled()
 									or not AddOn:GetShowFlightTimes()
-									or not AddOn:GetShowFlightTimerBar()
 								then
 									return true
 								end
@@ -475,7 +445,6 @@ local options = {
 								if
 									not AddOn:GetEnabled()
 									or not AddOn:GetShowFlightTimes()
-									or not AddOn:GetShowFlightTimerBar()
 								then
 									return true
 								end
@@ -496,7 +465,6 @@ local options = {
 								if
 									not AddOn:GetEnabled()
 									or not AddOn:GetShowFlightTimes()
-									or not AddOn:GetShowFlightTimerBar()
 								then
 									return true
 								end
@@ -521,7 +489,6 @@ local dbDefaults = {
 		autoCancelShapeShift = true,
 		showFlightTimes = true,
 		showSmoothRoutes = true,
-		showFlightTimerBar = true,
 		arrivalSound = AddOn.NO_ARRIVAL_SOUND,
 		flightTimerBarStyle = {
 			colorMode = "solid",
@@ -587,7 +554,6 @@ function AddOn:SetDefaultOptions()
 	self:SetArrivalSound(AddOn.db.global.arrivalSound)
 	self:SetShowSmoothRoutes(true)
 	self:SetShowFlightTimes(true)
-	self:SetShowFlightTimerBar(true)
 	self:ResetFlightTimerBarStyle()
 end
 --------------------------------
@@ -691,24 +657,6 @@ end
 --------------------------------
 function AddOn:GetShowSmoothRoutes()
 	local val = AddOn.db.global.showSmoothRoutes
-	if val == nil then
-		return true
-	end
-	return val
-end
---------------------------------
-function AddOn:SetShowFlightTimerBar(val)
-	AddOn.db.global.showFlightTimerBar = not not val
-	if not val then
-		AddOn:HideFlightTimerBar()
-	end
-	if AddOn.RefreshFlightTimerBarPreview then
-		AddOn:RefreshFlightTimerBarPreview()
-	end
-end
---------------------------------
-function AddOn:GetShowFlightTimerBar()
-	local val = AddOn.db.global.showFlightTimerBar
 	if val == nil then
 		return true
 	end

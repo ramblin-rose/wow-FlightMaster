@@ -24,7 +24,7 @@ local SOUND_ON_TEXTURE = "Interface\\Common\\VoiceChat-On"
 local SOUND_OFF_TEXTURE = "Interface\\Common\\VoiceChat-Muted"
 --------------------------------
 local function isFlightTimerBarEnabled()
-	return AddOn:GetEnabled() and AddOn:GetShowFlightTimes() and AddOn:GetShowFlightTimerBar()
+	return AddOn:GetEnabled() and AddOn:GetShowFlightTimes()
 end
 --------------------------------
 local function displayTaxiName(name)

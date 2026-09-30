@@ -472,7 +472,7 @@ local function finishFlightTimeSample()
 		return
 	end
 	local elapsed = math.floor(GetTime() - startTime + 0.5)
-	if elapsed > 0 and AddOn:GetShowFlightTimes() then
+	if elapsed > 0 then
 		AddOn:SetFlightTime(originID, destID, elapsed)
 	end
 	if type(pathSamples) == "table" and #pathSamples > 0 then
