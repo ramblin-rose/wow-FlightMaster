@@ -8,7 +8,7 @@ local function optIndex()
 end
 
 AddOn.NO_ARRIVAL_SOUND = "NO_ARRIVAL_SOUND"
-
+AddOn.DEFAULT_ARRIVAL_SOUND = "assets/arrived.ogg"
 local options = {
 	name = L.addOnName,
 
@@ -107,6 +107,19 @@ local options = {
 			end,
 			get = function(info)
 				return AddOn:GetArrivalSound()
+			end,
+		},
+		showSmoothRoutes = {
+			order = optIndex(),
+			name = L.configShowSmoothRoutes,
+			desc = L.configShowSmoothRoutesDesc,
+			type = "toggle",
+			width = "double",
+			set = function(info, val)
+				AddOn:SetShowSmoothRoutes(val)
+			end,
+			get = function(info)
+				return AddOn:GetShowSmoothRoutes()
 			end,
 		},
 		flightTimes = {
@@ -507,6 +520,7 @@ local dbDefaults = {
 		poiPinDimension = 14,
 		autoCancelShapeShift = true,
 		showFlightTimes = true,
+		showSmoothRoutes = true,
 		showFlightTimerBar = true,
 		arrivalSound = AddOn.NO_ARRIVAL_SOUND,
 		flightTimerBarStyle = {
@@ -556,8 +570,13 @@ function AddOn:OpenOptions()
 	end
 end
 --------------------------------
-function AddOn:OnSlashCommand()
-	AddOn:OpenOptions()
+function AddOn:OnSlashCommand(...)
+	local arg1 = ...
+	if arg1 == "w" then
+		AddOn.db.global.flightTimes.times = {}
+	else
+		AddOn:OpenOptions()
+	end
 end
 --------------------------------
 function AddOn:SetDefaultOptions()
@@ -566,6 +585,7 @@ function AddOn:SetDefaultOptions()
 	self:SetPoiDimension(14)
 	self:SetAutoCancelShapeShift(AddOn.db.global.autoCancelShapeShift)
 	self:SetArrivalSound(AddOn.db.global.arrivalSound)
+	self:SetShowSmoothRoutes(true)
 	self:SetShowFlightTimes(true)
 	self:SetShowFlightTimerBar(true)
 	self:ResetFlightTimerBarStyle()
@@ -615,7 +635,11 @@ end
 --------------------------------
 function AddOn:SetArrivalSound(val)
 	AddOn.db.global.arrivalSound = val
-	if AddOn.RefreshFlightTimerBarPreview then
+	local inRealFlight = AddOn.flightTimerState and not AddOn.flightTimerState.preview
+	if not inRealFlight then
+		AddOn.playArrivalSoundThisFlight = val ~= AddOn.NO_ARRIVAL_SOUND
+	end
+	if AddOn.UpdateFlightTimerSoundButton then
 		AddOn:UpdateFlightTimerSoundButton()
 	end
 end
@@ -625,15 +649,24 @@ function AddOn:GetArrivalSound()
 end
 --------------------------------
 function AddOn:PlayArrivalSound()
-	if AddOn.db.global.arrivalSound ~= AddOn.NO_ARRIVAL_SOUND then
-		PlaySoundFile("Interface\\AddOns\\" .. AddOn.name .. "\\" .. AddOn.db.global.arrivalSound, "MASTER")
+	local sound = AddOn.db.global.arrivalSound
+	if sound == AddOn.NO_ARRIVAL_SOUND then
+		if AddOn.playArrivalSoundThisFlight then
+			sound = AddOn.DEFAULT_ARRIVAL_SOUND
+		else
+			return
+		end
 	end
+	if not sound or sound == AddOn.NO_ARRIVAL_SOUND then
+		return
+	end
+	-- TODO harden this to ensure arrivalSound has the form assets/*.ogg
+	PlaySoundFile("Interface\\AddOns\\" .. AddOn.name .. "\\" .. sound, "MASTER")
 end
 --------------------------------
 function AddOn:SetShowFlightTimes(val)
 	AddOn.db.global.showFlightTimes = not not val
 	if not val then
-		AddOn:AbortFlightTimeSample()
 		AddOn:HideFlightTimerBar()
 	end
 	if AddOn.RefreshFlightTimerBarPreview then
@@ -643,6 +676,21 @@ end
 --------------------------------
 function AddOn:GetShowFlightTimes()
 	local val = AddOn.db.global.showFlightTimes
+	if val == nil then
+		return true
+	end
+	return val
+end
+--------------------------------
+function AddOn:SetShowSmoothRoutes(val)
+	AddOn.db.global.showSmoothRoutes = not not val
+	if AddOn.flightMasterContext and AddOn.dataProvider then
+		AddOn.dataProvider:RefreshAllData()
+	end
+end
+--------------------------------
+function AddOn:GetShowSmoothRoutes()
+	local val = AddOn.db.global.showSmoothRoutes
 	if val == nil then
 		return true
 	end

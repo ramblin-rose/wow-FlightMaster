@@ -1,13 +1,16 @@
 -- Directed origin→destination flight times, partitioned by client family.
--- A→B is not B→A; hop-sum is an estimate, not a measured through-flight.
+-- Missing A→B may use B→A as an estimate, for any hop count. Hop-sum is also an estimate.
 local AddOn = _G[select(1, ...)]
 --------------------------------
 local FLIGHT_TIMES_VERSION = 1
+local FLIGHT_PATHS_VERSION = 1
 local TAKEOFF_INTERVAL = 0.1
 local TAKEOFF_TIMEOUT = 15
+local PATH_SAMPLE_INTERVAL = 5
 
 local pending
 local watchTimer
+local pathTimer
 local controlEventRegistered
 --------------------------------
 local function getClientFamily()
@@ -54,6 +57,26 @@ local function ensureStore()
 		db.flightTimes = store
 	elseif type(store.times) ~= "table" then
 		store.times = {}
+	end
+	return store
+end
+--------------------------------
+local function ensurePathStore()
+	local db = AddOn.db and AddOn.db.global
+	if not db then
+		return nil
+	end
+	local era = getClientFamily()
+	local store = db.flightPaths
+	if type(store) ~= "table" or store.version ~= FLIGHT_PATHS_VERSION or store.era ~= era then
+		store = {
+			version = FLIGHT_PATHS_VERSION,
+			era = era,
+			paths = {},
+		}
+		db.flightPaths = store
+	elseif type(store.paths) ~= "table" then
+		store.paths = {}
 	end
 	return store
 end
@@ -158,6 +181,17 @@ function AddOn:GetFlightTime(originNodeID, destNodeID)
 	end
 end
 --------------------------------
+function AddOn:GetFlightTimeOrReverse(originNodeID, destNodeID)
+	local known = AddOn:GetFlightTime(originNodeID, destNodeID)
+	if known then
+		return known, false
+	end
+	local reverse = AddOn:GetFlightTime(destNodeID, originNodeID)
+	if reverse then
+		return reverse, true
+	end
+end
+--------------------------------
 function AddOn:SetFlightTime(originNodeID, destNodeID, seconds)
 	originNodeID = tonumber(originNodeID)
 	destNodeID = tonumber(destNodeID)
@@ -177,6 +211,82 @@ function AddOn:SetFlightTime(originNodeID, destNodeID, seconds)
 	from[destNodeID] = seconds
 end
 --------------------------------
+local function normalizePathSamples(samples)
+	if type(samples) ~= "table" then
+		return nil
+	end
+	local out = {}
+	local n = #samples
+	if n > 0 and type(samples[1]) == "table" then
+		for i = 1, n do
+			local s = samples[i]
+			if type(s) == "table" and s.x and s.y then
+				out[#out + 1] = s
+			end
+		end
+	else
+		local i = 1
+		while true do
+			local s = samples[i] or samples[tostring(i)]
+			if type(s) ~= "table" or not s.x or not s.y then
+				break
+			end
+			out[i] = s
+			i = i + 1
+		end
+	end
+	if #out > 0 then
+		return out
+	end
+end
+--------------------------------
+function AddOn:GetFlightPath(originNodeID, destNodeID)
+	originNodeID = tonumber(originNodeID)
+	destNodeID = tonumber(destNodeID)
+	if not originNodeID or not destNodeID then
+		return nil
+	end
+	local store = ensurePathStore()
+	if not store then
+		return nil
+	end
+	local from = tableGet(store.paths, originNodeID)
+	return normalizePathSamples(tableGet(from, destNodeID))
+end
+--------------------------------
+function AddOn:SetFlightPath(originNodeID, destNodeID, samples)
+	originNodeID = tonumber(originNodeID)
+	destNodeID = tonumber(destNodeID)
+	if not originNodeID or not destNodeID or type(samples) ~= "table" then
+		return
+	end
+	local copy = {}
+	for i = 1, #samples do
+		local p = samples[i]
+		if type(p) == "table" and p.x and p.y then
+			copy[#copy + 1] = {
+				x = p.x,
+				y = p.y,
+				z = p.z,
+				instanceID = p.instanceID,
+			}
+		end
+	end
+	if #copy < 1 then
+		return
+	end
+	local store = ensurePathStore()
+	if not store then
+		return
+	end
+	local from = store.paths[originNodeID]
+	if type(from) ~= "table" then
+		from = {}
+		store.paths[originNodeID] = from
+	end
+	from[destNodeID] = copy
+end
+--------------------------------
 function AddOn:EstimateFlightTime(destSlot)
 	if type(destSlot) ~= "number" or destSlot < 1 then
 		return nil
@@ -194,7 +304,7 @@ function AddOn:EstimateFlightTime(destSlot)
 		end
 		local originID = AddOn:GetTaxiNodeIDForSlot(srcSlot)
 		local destID = AddOn:GetTaxiNodeIDForSlot(dstSlot)
-		local leg = AddOn:GetFlightTime(originID, destID)
+		local leg = AddOn:GetFlightTimeOrReverse(originID, destID)
 		if not leg then
 			return nil
 		end
@@ -209,9 +319,9 @@ end
 function AddOn:GetDisplayedFlightTime(destSlot)
 	local originID = AddOn:GetOriginTaxiNodeID()
 	local destID = AddOn:GetTaxiNodeIDForSlot(destSlot)
-	local known = AddOn:GetFlightTime(originID, destID)
-	if known then
-		return known, false
+	local seconds, fromReverse = AddOn:GetFlightTimeOrReverse(originID, destID)
+	if seconds then
+		return seconds, fromReverse
 	end
 	local estimate = AddOn:EstimateFlightTime(destSlot)
 	if estimate then
@@ -232,6 +342,10 @@ function AddOn:FormatFlightTime(seconds)
 	return string.format("%d:%02d", minutes, secs)
 end
 --------------------------------
+function AddOn:FormatEstimatedFlightTime(seconds)
+	return "\226\137\136 " .. AddOn:FormatFlightTime(seconds)
+end
+--------------------------------
 function AddOn:AddFlightTimeTooltipLine(destSlot)
 	if not AddOn:GetShowFlightTimes() then
 		return
@@ -239,9 +353,11 @@ function AddOn:AddFlightTimeTooltipLine(destSlot)
 	local L = AddOn.L
 	local seconds, estimated = AddOn:GetDisplayedFlightTime(destSlot)
 	if seconds then
-		local formatted = AddOn:FormatFlightTime(seconds)
+		local formatted
 		if estimated then
-			formatted = "~" .. formatted
+			formatted = AddOn:FormatEstimatedFlightTime(seconds)
+		else
+			formatted = AddOn:FormatFlightTime(seconds)
 		end
 		GameTooltip:AddLine("|cffffd100" .. L.flightTimeLabel .. "|r |cffffffff" .. formatted .. "|r", 1, 1, 1)
 		return
@@ -280,11 +396,49 @@ local function persistActiveFlight()
 		invalid = pending.invalid,
 		arrivalClock = pending.arrivalClock,
 		numHops = pending.numHops,
+		known = pending.known,
+		pathSamples = pending.pathSamples,
 	}
+end
+--------------------------------
+local function stopFlightPathSampling()
+	if pathTimer then
+		AddOn.Timer:CancelTimer(pathTimer)
+		pathTimer = nil
+	end
+end
+--------------------------------
+local function sampleFlightPath()
+	if not pending then
+		return
+	end
+	pending.pathSamples = pending.pathSamples or {}
+	if type(AddOn.GetPlayerWorldPosition) == "function" then
+		local pos = AddOn:GetPlayerWorldPosition()
+		if not pos then
+			return
+		end
+		pending.pathSamples[#pending.pathSamples + 1] = pos
+	end
+end
+--------------------------------
+local function startFlightPathSampling()
+	stopFlightPathSampling()
+	if not pending then
+		return
+	end
+	pending.pathSamples = pending.pathSamples or {}
+	sampleFlightPath()
+	pathTimer = AddOn.Timer:ScheduleRepeatingTimer(function()
+		if pending and pending.confirmed and UnitOnTaxi("player") then
+			sampleFlightPath()
+		end
+	end, PATH_SAMPLE_INTERVAL)
 end
 --------------------------------
 function AddOn:AbortFlightTimeSample()
 	local wasFlying = pending and pending.confirmed
+	stopFlightPathSampling()
 	if watchTimer then
 		AddOn.Timer:CancelTimer(watchTimer)
 		watchTimer = nil
@@ -311,13 +465,18 @@ local function finishFlightTimeSample()
 	local destID = pending.destID
 	local startTime = pending.startTime
 	local invalid = pending.invalid
+	sampleFlightPath()
+	local pathSamples = pending.pathSamples
 	AddOn:AbortFlightTimeSample()
 	if invalid then
 		return
 	end
 	local elapsed = math.floor(GetTime() - startTime + 0.5)
-	if elapsed > 0 then
+	if elapsed > 0 and AddOn:GetShowFlightTimes() then
 		AddOn:SetFlightTime(originID, destID, elapsed)
+	end
+	if type(pathSamples) == "table" and #pathSamples > 0 then
+		AddOn:SetFlightPath(originID, destID, pathSamples)
 	end
 end
 --------------------------------
@@ -335,6 +494,7 @@ local function confirmTakeoff()
 		controlEventRegistered = true
 		AddOn:RegisterEvent("PLAYER_CONTROL_GAINED", "OnFlightTimeControlGained")
 	end
+	startFlightPathSampling()
 	persistActiveFlight()
 	AddOn:SendMessage(
 		AddOn.Message.TAXI_START,
@@ -344,7 +504,8 @@ local function confirmTakeoff()
 		pending.destName,
 		pending.estimated,
 		pending.arrivalClock,
-		pending.numHops
+		pending.numHops,
+		pending.known
 	)
 end
 --------------------------------
@@ -379,9 +540,7 @@ function AddOn:OnTakeTaxiNode(index)
 	-- layer below the progress frame, so that when the progress frame is hidden in this state.
 	-- OR, when the flight time is unknown create loop animation of the progress bar with the text
 	-- "Learning about this flight path
-	-- TODO Sound Control:The user should be able to toggle arrival sound on or off, its initial state being
-	-- the complement of the config settings.  If user has no sound selected then choose the most obnoxious sound.
-	if not AddOn:GetEnabled() or not AddOn:GetShowFlightTimes() then
+	if not AddOn:GetEnabled() then
 		return
 	end
 	AddOn:AbortFlightTimeSample()
@@ -403,7 +562,8 @@ function AddOn:OnTakeTaxiNode(index)
 		destName = TaxiNodeName(index)
 	end
 
-	local known = AddOn:GetFlightTime(originID, destID)
+	local flightTime, fromReverse = AddOn:GetFlightTimeOrReverse(originID, destID)
+	local known = flightTime ~= nil and not fromReverse
 	local numHops = GetNumRoutes and GetNumRoutes(index)
 	pending = {
 		originID = originID,
@@ -411,10 +571,11 @@ function AddOn:OnTakeTaxiNode(index)
 		startTime = GetTime(),
 		confirmed = false,
 		invalid = false,
-		duration = known or AddOn:EstimateFlightTime(index),
+		duration = flightTime or AddOn:EstimateFlightTime(index),
 		destName = destName,
 		estimated = not known,
 		numHops = tonumber(numHops),
+		known = known,
 	}
 
 	if UnitOnTaxi("player") then
@@ -424,8 +585,11 @@ function AddOn:OnTakeTaxiNode(index)
 end
 --------------------------------
 function AddOn:OnFlightTimeControlGained()
+	local playSound = AddOn.ShouldFlightTimerPlayArrivalSound and AddOn:ShouldFlightTimerPlayArrivalSound()
 	finishFlightTimeSample()
-	AddOn:PlayArrivalSound()
+	if playSound then
+		AddOn:PlayArrivalSound()
+	end
 end
 --------------------------------
 local function invalidateFlightTimeSample()
@@ -483,11 +647,14 @@ function AddOn:RestoreInFlightSession()
 				startTime = GetTime() - elapsed,
 				arrivalClock = saved.arrivalClock,
 				numHops = saved.numHops,
+				known = saved.known,
+				pathSamples = saved.pathSamples,
 			}
 			if not controlEventRegistered then
 				controlEventRegistered = true
 				AddOn:RegisterEvent("PLAYER_CONTROL_GAINED", "OnFlightTimeControlGained")
 			end
+			startFlightPathSampling()
 			startFlightTimeWatch()
 			if restoredProgressIsValid(saved, elapsed) then
 				AddOn:StartFlightTimerBar(
@@ -498,7 +665,8 @@ function AddOn:RestoreInFlightSession()
 					saved.estimated,
 					elapsed,
 					saved.arrivalClock,
-					saved.numHops
+					saved.numHops,
+					saved.known
 				)
 			end
 			return
@@ -515,6 +683,7 @@ end
 --------------------------------
 function AddOn:InitTaxiLog()
 	ensureStore()
+	ensurePathStore()
 	if AddOn.db and AddOn.db.global then
 		AddOn.db.global.taxiLog = nil
 	end

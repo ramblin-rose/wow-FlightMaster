@@ -225,7 +225,7 @@ function FlightMasterPointDataProviderMixin:RefreshAllData(fromOnShow)
 			end
 			if AddOn.currentTaxiNode then
 				AddOn:DrawHighlightedRoute(AddOn.currentTaxiNode)
-			elseif isValidContinentMap then
+			else
 				AddOn:DrawOneHopLines()
 			end
 		end
@@ -305,8 +305,6 @@ function FlightMasterPointPinMixin:OnMouseEnter()
 		return
 	end
 
-	local continentMapType = AddOn.GetContinentMapType and AddOn:GetContinentMapType() or 2
-	local isZone = AddOn.mapInfo and AddOn.mapInfo.mapType ~= continentMapType
 	local sessionType = TaxiNodeGetType(index)
 
 	AddOn:HideRouteLines()
@@ -325,7 +323,7 @@ function FlightMasterPointPinMixin:OnMouseEnter()
 		AddOn:DrawHighlightedRoute(index)
 	elseif sessionType == "DISTANT" or sessionType == "NONE" then
 		GameTooltip:AddLine(ERR_TAXINOPATHS, 250, 250, 250, true)
-	elseif sessionType == "CURRENT" and not isZone then
+	elseif sessionType == "CURRENT" then
 		GameTooltip:AddLine(TAXINODEYOUAREHERE, 1.0, 1.0, 1.0, true)
 		AddOn:DrawOneHopLines()
 	end
@@ -335,6 +333,10 @@ end
 --------------------------------
 function FlightMasterPointPinMixin:OnMouseLeave()
 	GameTooltip:Hide()
+	if AddOn.flightMasterContext then
+		AddOn.currentTaxiNode = nil
+		AddOn:DrawOneHopLines()
+	end
 end
 --------------------------------
 function FlightMasterPointPinMixin:IsMouseClickEnabled()
