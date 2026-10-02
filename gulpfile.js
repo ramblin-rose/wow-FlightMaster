@@ -53,7 +53,7 @@ function attributions(cb) {
 //////////////////////////////////
 function assets(cb) {
   const output = path.join("build", util.name, "assets");
-  const files = ["src/assets/icon.tga"];
+  const files = ["src/assets/icon.tga", "src/assets/*.ogg", "src/assets/*.png"];
   return src(files, { ignoreInitial: false, encoding: false })
     .pipe(dest(output))
     .pipe(touch());
@@ -138,13 +138,7 @@ async function addons() {
   const glob = `${addonBuild.replaceAll("\\", "/")}/**/*`;
 
   for (const flavor of wowFlavors) {
-    const output = path.join(
-      wowRoot,
-      flavor,
-      "Interface",
-      "AddOns",
-      util.name,
-    );
+    const output = path.join(wowRoot, flavor, "Interface", "AddOns", util.name);
     console.log("Copying build to " + output);
     deleteSync([output.replaceAll("\\", "/")], { force: true });
     await streamDone(

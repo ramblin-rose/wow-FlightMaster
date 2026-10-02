@@ -9,4 +9,5 @@ function AddOn:InitHook()
 	if WorldMapFrame.Maximize then
 		AddOn:SecureHook(WorldMapFrame, "Maximize", AddOn.RestoreTaxiContinentMap)
 	end
+	AddOn:SecureHook("TakeTaxiNode", "OnTakeTaxiNode")
 end
