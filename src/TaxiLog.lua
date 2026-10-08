@@ -1,9 +1,9 @@
--- Directed origin→destination flight times, partitioned by client family.
+-- Directed origin→destination flight times, partitioned by AceDB faction and client family.
 -- Missing A→B may use B→A as an estimate, for any hop count. Hop-sum is also an estimate.
 local AddOn = _G[select(1, ...)]
 --------------------------------
-local FLIGHT_TIMES_VERSION = 1
-local FLIGHT_PATHS_VERSION = 1
+local FLIGHT_TIMES_VERSION = 3
+local FLIGHT_PATHS_VERSION = 3
 local TAKEOFF_INTERVAL = 0.1
 local TAKEOFF_TIMEOUT = 15
 local PATH_SAMPLE_INTERVAL = 5
@@ -12,8 +12,9 @@ local pending
 local watchTimer
 local pathTimer
 local controlEventRegistered
+local normalizePathSamples
 --------------------------------
-local function getClientFamily()
+function AddOn:GetClientFamily()
 	local build = select(4, GetBuildInfo())
 	if type(build) ~= "number" or build < 20000 then
 		return "classic-era"
@@ -22,6 +23,21 @@ local function getClientFamily()
 		return "tbc"
 	end
 	return "mop"
+end
+--------------------------------
+function AddOn:GetPlayerFaction()
+	local faction = UnitFactionGroup("player")
+	if faction == "Alliance" or faction == "Horde" then
+		return faction
+	end
+	return "Neutral"
+end
+--------------------------------
+function AddOn:GetSyncFaction()
+	local faction = UnitFactionGroup("player")
+	if faction == "Alliance" or faction == "Horde" then
+		return faction
+	end
 end
 --------------------------------
 local function tableGet(t, key)
@@ -41,44 +57,218 @@ local function tableGet(t, key)
 	end
 end
 --------------------------------
-local function ensureStore()
-	local db = AddOn.db and AddOn.db.global
-	if not db then
+local function migrateTimeMap(oldTimes)
+	local dest = {}
+	if type(oldTimes) ~= "table" then
+		return dest
+	end
+	for origin, tos in pairs(oldTimes) do
+		if type(tos) == "table" then
+			local row = {}
+			for destID, value in pairs(tos) do
+				if type(value) == "table" then
+					local seconds = tonumber(value.seconds)
+					if seconds and seconds > 0 then
+						row[destID] = {
+							seconds = math.floor(seconds),
+							n = math.max(1, math.floor(tonumber(value.n) or 1)),
+						}
+					end
+				else
+					local seconds = tonumber(value)
+					if seconds and seconds > 0 then
+						row[destID] = { seconds = math.floor(seconds), n = 1 }
+					end
+				end
+			end
+			if next(row) then
+				dest[origin] = row
+			end
+		end
+	end
+	return dest
+end
+--------------------------------
+local function migratePathMap(oldPaths)
+	local dest = {}
+	if type(oldPaths) ~= "table" then
+		return dest
+	end
+	for origin, tos in pairs(oldPaths) do
+		if type(tos) == "table" then
+			local row = {}
+			for destID, value in pairs(tos) do
+				if type(value) == "table" and value.samples then
+					row[destID] = {
+						samples = value.samples,
+						n = math.max(1, math.floor(tonumber(value.n) or 1)),
+					}
+				elseif type(value) == "table" then
+					row[destID] = { samples = value, n = 1 }
+				end
+			end
+			if next(row) then
+				dest[origin] = row
+			end
+		end
+	end
+	return dest
+end
+--------------------------------
+local function globalEraMatches(root, era)
+	if type(root) ~= "table" then
+		return false
+	end
+	if root.era == nil then
+		return true
+	end
+	return root.era == era
+end
+--------------------------------
+local function takeGlobalMap(root, mapKey, faction)
+	if type(root) ~= "table" then
+		return nil, false
+	end
+	if type(root.byFaction) == "table" then
+		local bucket = root.byFaction[faction]
+		if type(bucket) == "table" and type(bucket[mapKey]) == "table" then
+			return bucket[mapKey], false
+		end
+		return nil, false
+	end
+	if type(root[mapKey]) == "table" then
+		return root[mapKey], true
+	end
+	return nil, false
+end
+--------------------------------
+local function pruneGlobalSection(sv, field, mapKey, faction, consumedV1)
+	local root = sv[field]
+	if type(root) ~= "table" then
+		return
+	end
+	if type(root.byFaction) == "table" then
+		root.byFaction[faction] = nil
+		if not next(root.byFaction) then
+			root.byFaction = nil
+		end
+	end
+	if consumedV1 then
+		root[mapKey] = nil
+	end
+	if root.byFaction == nil and (type(root[mapKey]) ~= "table" or not next(root[mapKey])) then
+		sv[field] = nil
+	end
+end
+--------------------------------
+local function factionStoreValid(store, version, era, mapKey)
+	return type(store) == "table" and store.version == version and store.era == era and type(store[mapKey]) == "table"
+end
+--------------------------------
+local function migrateGlobalSection(field, mapKey, version, migrate)
+	if not AddOn.db then
+		return
+	end
+	local factionDB = AddOn.db.faction
+	local globalDB = AddOn.db.global
+	if not factionDB or not globalDB then
+		return
+	end
+	local era = AddOn:GetClientFamily()
+	local faction = AddOn:GetPlayerFaction()
+	local dest = factionDB[field]
+	if factionStoreValid(dest, version, era, mapKey) then
+		if globalEraMatches(globalDB[field], era) then
+			pruneGlobalSection(globalDB, field, mapKey, faction, false)
+		end
+		return
+	end
+	local map = {}
+	local consumedV1 = false
+	local globalRoot = globalDB[field]
+	if globalEraMatches(globalRoot, era) then
+		local source
+		source, consumedV1 = takeGlobalMap(globalRoot, mapKey, faction)
+		map = migrate(source)
+	end
+	factionDB[field] = {
+		version = version,
+		era = era,
+		[mapKey] = map,
+	}
+	if globalEraMatches(globalRoot, era) then
+		pruneGlobalSection(globalDB, field, mapKey, faction, consumedV1)
+	end
+end
+--------------------------------
+local function migrateGlobalFlightData()
+	migrateGlobalSection("flightTimes", "times", FLIGHT_TIMES_VERSION, migrateTimeMap)
+	migrateGlobalSection("flightPaths", "paths", FLIGHT_PATHS_VERSION, migratePathMap)
+	if AddOn.InvalidateSyncMerkle then
+		AddOn:InvalidateSyncMerkle()
+	end
+end
+--------------------------------
+local function ensureFactionStore(field, mapKey, version)
+	if not AddOn.db or not AddOn.db.faction then
 		return nil
 	end
-	local era = getClientFamily()
-	local store = db.flightTimes
-	if type(store) ~= "table" or store.version ~= FLIGHT_TIMES_VERSION or store.era ~= era then
+	local era = AddOn:GetClientFamily()
+	local store = AddOn.db.faction[field]
+	if not factionStoreValid(store, version, era, mapKey) then
 		store = {
-			version = FLIGHT_TIMES_VERSION,
+			version = version,
 			era = era,
-			times = {},
+			[mapKey] = {},
 		}
-		db.flightTimes = store
-	elseif type(store.times) ~= "table" then
-		store.times = {}
+		AddOn.db.faction[field] = store
 	end
 	return store
 end
 --------------------------------
+local function ensureStore()
+	return ensureFactionStore("flightTimes", "times", FLIGHT_TIMES_VERSION)
+end
+--------------------------------
 local function ensurePathStore()
-	local db = AddOn.db and AddOn.db.global
-	if not db then
+	return ensureFactionStore("flightPaths", "paths", FLIGHT_PATHS_VERSION)
+end
+--------------------------------
+local function readTimeRecord(value)
+	if type(value) == "table" then
+		local seconds = tonumber(value.seconds)
+		if seconds and seconds > 0 then
+			return seconds, math.max(1, math.floor(tonumber(value.n) or 1))
+		end
 		return nil
 	end
-	local era = getClientFamily()
-	local store = db.flightPaths
-	if type(store) ~= "table" or store.version ~= FLIGHT_PATHS_VERSION or store.era ~= era then
-		store = {
-			version = FLIGHT_PATHS_VERSION,
-			era = era,
-			paths = {},
-		}
-		db.flightPaths = store
-	elseif type(store.paths) ~= "table" then
-		store.paths = {}
+	local seconds = tonumber(value)
+	if seconds and seconds > 0 then
+		return seconds, 1
 	end
-	return store
+end
+--------------------------------
+local function readPathRecord(value)
+	if type(value) ~= "table" then
+		return nil
+	end
+	if value.samples then
+		local samples = normalizePathSamples(value.samples)
+		if samples then
+			return samples, math.max(1, math.floor(tonumber(value.n) or 1))
+		end
+		return nil
+	end
+	local samples = normalizePathSamples(value)
+	if samples then
+		return samples, 1
+	end
+end
+--------------------------------
+local function notifyObservation(kind, originID, destID)
+	if AddOn.OnLocalFlightObservation then
+		AddOn:OnLocalFlightObservation(kind, originID, destID)
+	end
 end
 --------------------------------
 function AddOn:GetTaxiNodeID(node)
@@ -163,7 +353,7 @@ function AddOn:GetOriginTaxiNodeID()
 	return AddOn:GetTaxiNodeIDForSlot(AddOn:GetCurrentTaxiSlot())
 end
 --------------------------------
-function AddOn:GetFlightTime(originNodeID, destNodeID)
+function AddOn:GetFlightTimeMeta(originNodeID, destNodeID)
 	originNodeID = tonumber(originNodeID)
 	destNodeID = tonumber(destNodeID)
 	if not originNodeID or not destNodeID then
@@ -174,11 +364,12 @@ function AddOn:GetFlightTime(originNodeID, destNodeID)
 		return nil
 	end
 	local from = tableGet(store.times, originNodeID)
-	local seconds = tableGet(from, destNodeID)
-	seconds = tonumber(seconds)
-	if seconds and seconds > 0 then
-		return seconds
-	end
+	return readTimeRecord(tableGet(from, destNodeID))
+end
+--------------------------------
+function AddOn:GetFlightTime(originNodeID, destNodeID)
+	local seconds = AddOn:GetFlightTimeMeta(originNodeID, destNodeID)
+	return seconds
 end
 --------------------------------
 function AddOn:GetFlightTimeOrReverse(originNodeID, destNodeID)
@@ -192,6 +383,25 @@ function AddOn:GetFlightTimeOrReverse(originNodeID, destNodeID)
 	end
 end
 --------------------------------
+local function writeTimeRecord(originNodeID, destNodeID, seconds, n, silent)
+	local store = ensureStore()
+	if not store then
+		return false
+	end
+	local from = store.times[originNodeID]
+	if type(from) ~= "table" then
+		from = {}
+		store.times[originNodeID] = from
+	end
+	from[destNodeID] = { seconds = seconds, n = n }
+	if not silent then
+		notifyObservation("t", originNodeID, destNodeID)
+	elseif AddOn.InvalidateSyncMerkle then
+		AddOn:InvalidateSyncMerkle()
+	end
+	return true
+end
+--------------------------------
 function AddOn:SetFlightTime(originNodeID, destNodeID, seconds)
 	originNodeID = tonumber(originNodeID)
 	destNodeID = tonumber(destNodeID)
@@ -199,19 +409,53 @@ function AddOn:SetFlightTime(originNodeID, destNodeID, seconds)
 	if not originNodeID or not destNodeID or seconds < 1 then
 		return
 	end
-	local store = ensureStore()
-	if not store then
-		return
+	local oldSeconds, oldN = AddOn:GetFlightTimeMeta(originNodeID, destNodeID)
+	local n = 1
+	if oldSeconds then
+		if math.abs(oldSeconds - seconds) / oldSeconds < 0.15 then
+			n = (oldN or 1) + 1
+			seconds = math.floor((oldSeconds * (oldN or 1) + seconds) / n + 0.5)
+		else
+			n = oldN or 1
+		end
 	end
-	local from = store.times[originNodeID]
-	if type(from) ~= "table" then
-		from = {}
-		store.times[originNodeID] = from
-	end
-	from[destNodeID] = seconds
+	writeTimeRecord(originNodeID, destNodeID, seconds, n, false)
 end
 --------------------------------
-local function normalizePathSamples(samples)
+function AddOn:ApplySyncedFlightTime(originNodeID, destNodeID, seconds, n)
+	originNodeID = tonumber(originNodeID)
+	destNodeID = tonumber(destNodeID)
+	seconds = math.floor(tonumber(seconds) or 0)
+	n = math.max(1, math.floor(tonumber(n) or 1))
+	if not originNodeID or not destNodeID or seconds < 1 then
+		return
+	end
+	writeTimeRecord(originNodeID, destNodeID, seconds, n, true)
+end
+--------------------------------
+function AddOn:ForEachFlightTime(fn)
+	if type(fn) ~= "function" then
+		return
+	end
+	local store = ensureStore()
+	if not store or type(store.times) ~= "table" then
+		return
+	end
+	for origin, tos in pairs(store.times) do
+		origin = tonumber(origin)
+		if origin and type(tos) == "table" then
+			for dest, value in pairs(tos) do
+				dest = tonumber(dest)
+				local seconds, n = readTimeRecord(value)
+				if dest and seconds then
+					fn(origin, dest, seconds, n)
+				end
+			end
+		end
+	end
+end
+--------------------------------
+function normalizePathSamples(samples)
 	if type(samples) ~= "table" then
 		return nil
 	end
@@ -240,7 +484,7 @@ local function normalizePathSamples(samples)
 	end
 end
 --------------------------------
-function AddOn:GetFlightPath(originNodeID, destNodeID)
+function AddOn:GetFlightPathMeta(originNodeID, destNodeID)
 	originNodeID = tonumber(originNodeID)
 	destNodeID = tonumber(destNodeID)
 	if not originNodeID or not destNodeID then
@@ -251,15 +495,15 @@ function AddOn:GetFlightPath(originNodeID, destNodeID)
 		return nil
 	end
 	local from = tableGet(store.paths, originNodeID)
-	return normalizePathSamples(tableGet(from, destNodeID))
+	return readPathRecord(tableGet(from, destNodeID))
 end
 --------------------------------
-function AddOn:SetFlightPath(originNodeID, destNodeID, samples)
-	originNodeID = tonumber(originNodeID)
-	destNodeID = tonumber(destNodeID)
-	if not originNodeID or not destNodeID or type(samples) ~= "table" then
-		return
-	end
+function AddOn:GetFlightPath(originNodeID, destNodeID)
+	local samples = AddOn:GetFlightPathMeta(originNodeID, destNodeID)
+	return samples
+end
+--------------------------------
+local function copyPathSamples(samples)
 	local copy = {}
 	for i = 1, #samples do
 		local p = samples[i]
@@ -273,18 +517,105 @@ function AddOn:SetFlightPath(originNodeID, destNodeID, samples)
 		end
 	end
 	if #copy < 1 then
-		return
+		return nil
 	end
+	return copy
+end
+--------------------------------
+local function writePathRecord(originNodeID, destNodeID, samples, n, silent)
 	local store = ensurePathStore()
 	if not store then
-		return
+		return false
 	end
 	local from = store.paths[originNodeID]
 	if type(from) ~= "table" then
 		from = {}
 		store.paths[originNodeID] = from
 	end
-	from[destNodeID] = copy
+	from[destNodeID] = { samples = samples, n = n }
+	if not silent then
+		notifyObservation("p", originNodeID, destNodeID)
+	elseif AddOn.InvalidateSyncMerkle then
+		AddOn:InvalidateSyncMerkle()
+	end
+	return true
+end
+--------------------------------
+function AddOn:SetFlightPath(originNodeID, destNodeID, samples)
+	originNodeID = tonumber(originNodeID)
+	destNodeID = tonumber(destNodeID)
+	if not originNodeID or not destNodeID or type(samples) ~= "table" then
+		return
+	end
+	local copy = copyPathSamples(samples)
+	if not copy then
+		return
+	end
+	local _, oldN = AddOn:GetFlightPathMeta(originNodeID, destNodeID)
+	writePathRecord(originNodeID, destNodeID, copy, (oldN or 0) + 1, false)
+end
+--------------------------------
+function AddOn:ApplySyncedFlightPath(originNodeID, destNodeID, samples, n)
+	originNodeID = tonumber(originNodeID)
+	destNodeID = tonumber(destNodeID)
+	n = math.max(1, math.floor(tonumber(n) or 1))
+	if not originNodeID or not destNodeID or type(samples) ~= "table" then
+		return
+	end
+	local copy = copyPathSamples(samples)
+	if not copy then
+		return
+	end
+	writePathRecord(originNodeID, destNodeID, copy, n, true)
+end
+--------------------------------
+function AddOn:ForEachFlightPath(fn)
+	if type(fn) ~= "function" then
+		return
+	end
+	local store = ensurePathStore()
+	if not store or type(store.paths) ~= "table" then
+		return
+	end
+	for origin, tos in pairs(store.paths) do
+		origin = tonumber(origin)
+		if origin and type(tos) == "table" then
+			for dest, value in pairs(tos) do
+				dest = tonumber(dest)
+				local samples, n = readPathRecord(value)
+				if dest and samples then
+					fn(origin, dest, samples, n)
+				end
+			end
+		end
+	end
+end
+--------------------------------
+function AddOn:CountKnownFlightData()
+	local times, paths = 0, 0
+	AddOn:ForEachFlightTime(function()
+		times = times + 1
+	end)
+	AddOn:ForEachFlightPath(function()
+		paths = paths + 1
+	end)
+	return times, paths
+end
+--------------------------------
+function AddOn:PrintFlightDataCount()
+	local times, paths = AddOn:CountKnownFlightData()
+	AddOn:Print(string.format(AddOn.L.flightDataCount, times, paths))
+end
+--------------------------------
+function AddOn:WipeFactionFlightTimes()
+	local store = ensureStore()
+	if not store then
+		return
+	end
+	store.times = {}
+	if AddOn.InvalidateSyncMerkle then
+		AddOn:InvalidateSyncMerkle()
+	end
 end
 --------------------------------
 function AddOn:EstimateFlightTime(destSlot)
@@ -682,6 +1013,7 @@ function AddOn:RestoreInFlightSession()
 end
 --------------------------------
 function AddOn:InitTaxiLog()
+	migrateGlobalFlightData()
 	ensureStore()
 	ensurePathStore()
 	if AddOn.db and AddOn.db.global then

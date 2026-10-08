@@ -27,6 +27,65 @@ local function isFlightTimerBarEnabled()
 	return AddOn:GetEnabled() and AddOn:GetShowFlightTimes()
 end
 --------------------------------
+local vehicleLeaveButtonHooked
+
+local function shouldHideStockVehicleLeaveButton()
+	local hops = AddOn.flightTimerState and tonumber(AddOn.flightTimerState.numHops)
+	return AddOn.flightTimerState
+		and not AddOn.flightTimerState.preview
+		and hops
+		and hops > 1
+		and AddOn.flightTimerFrame
+		and AddOn.flightTimerFrame:IsShown()
+end
+--------------------------------
+local function hideStockVehicleLeaveButton()
+	if not shouldHideStockVehicleLeaveButton() then
+		return
+	end
+	local btn = _G.MainMenuBarVehicleLeaveButton
+	if btn and btn:IsShown() then
+		btn:Hide()
+	end
+end
+--------------------------------
+local function restoreStockVehicleLeaveButton()
+	if shouldHideStockVehicleLeaveButton() then
+		return
+	end
+	if type(_G.MainMenuBarVehicleLeaveButton_Update) == "function" then
+		_G.MainMenuBarVehicleLeaveButton_Update()
+		return
+	end
+	local btn = _G.MainMenuBarVehicleLeaveButton
+	if btn and UnitOnTaxi("player") then
+		btn:Show()
+	end
+end
+--------------------------------
+local function hookStockVehicleLeaveButton()
+	if vehicleLeaveButtonHooked then
+		return
+	end
+	local btn = _G.MainMenuBarVehicleLeaveButton
+	if not btn then
+		return
+	end
+	vehicleLeaveButtonHooked = true
+	btn:HookScript("OnShow", function(self)
+		if shouldHideStockVehicleLeaveButton() then
+			self:Hide()
+		end
+	end)
+	if type(_G.MainMenuBarVehicleLeaveButton_Update) == "function" then
+		hooksecurefunc("MainMenuBarVehicleLeaveButton_Update", function()
+			if shouldHideStockVehicleLeaveButton() then
+				hideStockVehicleLeaveButton()
+			end
+		end)
+	end
+end
+--------------------------------
 local function displayTaxiName(name)
 	if type(name) ~= "string" or name == "" then
 		return ""
@@ -287,7 +346,7 @@ function AddOn:PositionFlightTimerBar()
 		end
 		frame:SetPoint("CENTER", UIParent, "BOTTOMLEFT", pos.x / scale, pos.y / scale)
 	else
-		frame:SetPoint("CENTER", UIParent, "TOP", 0, -(UIParent:GetHeight() / 6))
+		frame:SetPoint("CENTER", UIParent, "TOP", 0, -(UIParent:GetHeight() / 7))
 	end
 end
 --------------------------------
@@ -815,6 +874,7 @@ function AddOn:HideFlightTimerBar()
 	if cancelled then
 		AddOn:ShowFlightCancelledMessage()
 	end
+	restoreStockVehicleLeaveButton()
 end
 --------------------------------
 function AddOn:StartFlightTimerBar(
@@ -865,6 +925,8 @@ function AddOn:StartFlightTimerBar(
 	AddOn:UpdateFlightTimerMover()
 	AddOn:UpdateFlightTimerEarlyLandingButton()
 	AddOn:UpdateFlightTimerSoundButton()
+	hookStockVehicleLeaveButton()
+	hideStockVehicleLeaveButton()
 end
 --------------------------------
 function AddOn:UpdateFlightTimerBar(dt)
@@ -1049,6 +1111,7 @@ function AddOn:RefreshFlightTimerBarPreview()
 end
 --------------------------------
 function AddOn:InitTaxiTimer()
+	hookStockVehicleLeaveButton()
 	AddOn:AddMessageHandler(
 		AddOn.Message.TAXI_START,
 		function(originID, destID, duration, destName, estimated, arrivalClock, numHops, known)

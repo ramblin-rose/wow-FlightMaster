@@ -3,6 +3,8 @@ local AddOn = _G[select(1, ...)]
 
 function AddOn:OnInitialize()
 	AddOn.Timer = LibStub("AceTimer-3.0")
+	-- Prefixes must be registered before PLAYER_ENTERING_WORLD.
+	AddOn:InitSyncTransport()
 	AddOn:RegisterEvent("PLAYER_ENTERING_WORLD", function()
 		AddOn:UnregisterEvent("PLAYER_ENTERING_WORLD")
 		AddOn:InitConfig()
@@ -13,6 +15,7 @@ function AddOn:OnInitialize()
 		AddOn:InitRoute()
 		AddOn:InitFlightMasterDataProvider()
 		AddOn:InitTaxiLog()
+		AddOn:InitSync()
 		AddOn:InitTaxiTimer()
 		AddOn:InitCompatibility()
 		AddOn:SetEnabled(true)
@@ -84,6 +87,9 @@ function AddOn:OnTaxiMapOpened(...)
 	end
 	AddOn:EnableDataProviderRefresh(true)
 	AddOn:EnableFlightMasterInteractionDistance(true)
+	if AddOn.NotifySyncTaxiMapOpened then
+		AddOn:NotifySyncTaxiMapOpened()
+	end
 end
 --------------------------------
 function AddOn:OnShowWorldMapFrame()
