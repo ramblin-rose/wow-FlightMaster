@@ -47,30 +47,6 @@ function AddOn:PerformRouteLineDraw(line, taxiNodeIndex, routeNodeIndex, frame)
 	end
 end
 --------------------------------
-local function hopNodeIDs(taxiNodeIndex, routeNodeIndex)
-	local srcSlot = TaxiGetNodeSlot(taxiNodeIndex, routeNodeIndex, true)
-	local dstSlot = TaxiGetNodeSlot(taxiNodeIndex, routeNodeIndex, false)
-	local numRoutes = GetNumRoutes(taxiNodeIndex)
-	if (not dstSlot or dstSlot < 1) and routeNodeIndex == numRoutes then
-		dstSlot = taxiNodeIndex
-	end
-	local originID
-	if routeNodeIndex == 1 then
-		originID = AddOn:GetOriginTaxiNodeID()
-	end
-	if not originID then
-		originID = AddOn:GetTaxiNodeIDForSlot(srcSlot)
-	end
-	local destID
-	if routeNodeIndex == numRoutes then
-		destID = AddOn:GetTaxiNodeIDForSlot(taxiNodeIndex)
-	end
-	if not destID then
-		destID = AddOn:GetTaxiNodeIDForSlot(dstSlot)
-	end
-	return originID, destID
-end
---------------------------------
 local function hideUnusedRouteLines(used)
 	local routeLines = AddOn.routeLines
 	for i = used + 1, #routeLines do
@@ -80,7 +56,7 @@ end
 --------------------------------
 local function drawHopOrSmooth(taxiNodeIndex, routeNodeIndex, frame, startIndex)
 	if AddOn.DrawSmoothFlightPath then
-		local originID, destID = hopNodeIDs(taxiNodeIndex, routeNodeIndex)
+		local originID, destID = AddOn:GetHopTaxiNodeIDs(taxiNodeIndex, routeNodeIndex)
 		local drawn = AddOn:DrawSmoothFlightPath(originID, destID, frame, startIndex)
 		if drawn and drawn > 0 then
 			return drawn

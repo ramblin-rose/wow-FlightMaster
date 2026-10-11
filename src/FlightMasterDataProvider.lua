@@ -190,8 +190,11 @@ function FlightMasterPointDataProviderMixin:RefreshAllData(fromOnShow)
 
 				-- Always keep hop endpoints, including TBC DISTANT nodes.
 				-- C_TaxiMap.slotIndex is not the live taxi-session index.
+				-- Persist times/paths with nodeID; only slotIndex is the session handle.
 				if taxiNode then
+					local nodeID = taxiNode.nodeID
 					taxiNode.slotIndex = i
+					taxiNode.nodeID = nodeID
 					if taxiNode.state == nil then
 						taxiNode.state = taxiNodeTypeToState(sessionType)
 					end
