@@ -78,6 +78,12 @@ L.oggRingo = "Ring-O"
 L.oggSerious = "Sérieux"
 L.oggSmile = "Sourire"
 L.learningFlightTime = "Apprentissage de la trajectoire de vol"
+L.flightDataViewTitle = "Trajectoires de vol connues"
+L.flightDataViewPathsKnown = "Trajectoires connues : %d"
+L.flightDataViewOrigin = "Origine"
+L.flightDataViewDestination = "Destination"
+L.flightDataViewTime = "Durée"
+L.flightDataViewPath = "Trajectoire"
 
 -- stylua: ignore start
 L.configAutoCancelShapeShiftDesc = [[

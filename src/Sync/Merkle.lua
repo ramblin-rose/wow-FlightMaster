@@ -1,18 +1,12 @@
 local AddOn = _G[select(1, ...)]
 --------------------------------
 local BUCKETS = 32
-
-local dirty = true
-local timeRoot
-local timeBuckets
-local pathRoot
-local pathBuckets
 --------------------------------
-local function bucketIndex(originID)
-	return (AddOn:SyncAdler32(tostring(originID)) % BUCKETS) + 1
+local function bucketIndex(self, originID)
+	return (self:SyncAdler32(tostring(originID)) % BUCKETS) + 1
 end
 --------------------------------
-local function hashList(entries)
+local function hashList(self, entries)
 	table.sort(entries, function(a, b)
 		return a.key < b.key
 	end)
@@ -28,11 +22,12 @@ local function hashList(entries)
 		local b4 = h % 256
 		chunks[i] = string.char(b1, b2, b3, b4)
 	end
-	return AddOn:SyncAdler32(table.concat(chunks))
+	return self:SyncAdler32(table.concat(chunks))
 end
 --------------------------------
-local function rebuild()
-	if not dirty then
+local function rebuild(self)
+	local s = self:EnsureSyncState()
+	if not s.merkleDirty then
 		return
 	end
 	local timeLists = {}
@@ -41,51 +36,53 @@ local function rebuild()
 		timeLists[i] = {}
 		pathLists[i] = {}
 	end
-	if AddOn.ForEachFlightTime then
-		AddOn:ForEachFlightTime(function(originID, destID, seconds, n)
-			local i = bucketIndex(originID)
+	if self.ForEachFlightTime then
+		self:ForEachFlightTime(function(originID, destID, seconds, n)
+			local i = bucketIndex(self, originID)
 			timeLists[i][#timeLists[i] + 1] = {
 				key = originID .. ":" .. destID,
-				hash = AddOn:HashFlightTimeRecord(originID, destID, seconds, n),
+				hash = self:HashFlightTimeRecord(originID, destID, seconds, n),
 			}
 		end)
 	end
-	if AddOn.ForEachFlightPath then
-		AddOn:ForEachFlightPath(function(originID, destID, samples, n)
-			local inst, pts = AddOn:QuantizePathPoints(samples)
+	if self.ForEachFlightPath then
+		self:ForEachFlightPath(function(originID, destID, samples, n)
+			local inst, pts = self:QuantizePathPoints(samples)
 			if not pts then
 				return
 			end
-			local i = bucketIndex(originID)
+			local i = bucketIndex(self, originID)
 			pathLists[i][#pathLists[i] + 1] = {
 				key = originID .. ":" .. destID,
-				hash = AddOn:HashFlightPathPoints(originID, destID, n, inst, pts),
+				hash = self:HashFlightPathPoints(originID, destID, n, inst, pts),
 			}
 		end)
 	end
-	timeBuckets = {}
-	pathBuckets = {}
+	s.timeBuckets = {}
+	s.pathBuckets = {}
 	for i = 1, BUCKETS do
-		timeBuckets[i] = hashList(timeLists[i])
-		pathBuckets[i] = hashList(pathLists[i])
+		s.timeBuckets[i] = hashList(self, timeLists[i])
+		s.pathBuckets[i] = hashList(self, pathLists[i])
 	end
-	timeRoot = AddOn:SyncAdler32(AddOn:PackBucketHashes(timeBuckets))
-	pathRoot = AddOn:SyncAdler32(AddOn:PackBucketHashes(pathBuckets))
-	dirty = false
+	s.timeRoot = self:SyncAdler32(self:PackBucketHashes(s.timeBuckets))
+	s.pathRoot = self:SyncAdler32(self:PackBucketHashes(s.pathBuckets))
+	s.merkleDirty = false
 end
 --------------------------------
 function AddOn:InvalidateSyncMerkle()
-	dirty = true
+	self:EnsureSyncState().merkleDirty = true
 end
 --------------------------------
 function AddOn:GetSyncTimeDigest()
-	rebuild()
-	return timeRoot, timeBuckets
+	rebuild(self)
+	local s = self.sync
+	return s.timeRoot, s.timeBuckets
 end
 --------------------------------
 function AddOn:GetSyncPathDigest()
-	rebuild()
-	return pathRoot, pathBuckets
+	rebuild(self)
+	local s = self.sync
+	return s.pathRoot, s.pathBuckets
 end
 --------------------------------
 function AddOn:GetSyncBucketCount()
@@ -97,7 +94,7 @@ function AddOn:GetSyncBucketIndex(originID)
 	if not originID then
 		return nil
 	end
-	return bucketIndex(originID)
+	return bucketIndex(self, originID)
 end
 --------------------------------
 function AddOn:CollectSyncBucketTimes(index)
@@ -106,8 +103,8 @@ function AddOn:CollectSyncBucketTimes(index)
 		return nil
 	end
 	local recs = {}
-	AddOn:ForEachFlightTime(function(originID, destID, seconds, n)
-		if bucketIndex(originID) == index then
+	self:ForEachFlightTime(function(originID, destID, seconds, n)
+		if bucketIndex(self, originID) == index then
 			recs[#recs + 1] = { o = originID, d = destID, s = seconds, n = n }
 		end
 	end)
@@ -120,16 +117,16 @@ function AddOn:CollectSyncBucketPathKeys(index)
 		return nil
 	end
 	local recs = {}
-	AddOn:ForEachFlightPath(function(originID, destID, samples, n)
-		local inst, pts = AddOn:QuantizePathPoints(samples)
+	self:ForEachFlightPath(function(originID, destID, samples, n)
+		local inst, pts = self:QuantizePathPoints(samples)
 		if not pts then
 			return
 		end
-		if bucketIndex(originID) == index then
+		if bucketIndex(self, originID) == index then
 			recs[#recs + 1] = {
 				o = originID,
 				d = destID,
-				h = AddOn:HashFlightPathPoints(originID, destID, n, inst, pts),
+				h = self:HashFlightPathPoints(originID, destID, n, inst, pts),
 			}
 		end
 	end)
@@ -137,7 +134,7 @@ function AddOn:CollectSyncBucketPathKeys(index)
 end
 --------------------------------
 function AddOn:DifferingBuckets(localHashes, remoteBlob)
-	local remote = AddOn:UnpackBucketHashes(remoteBlob)
+	local remote = self:UnpackBucketHashes(remoteBlob)
 	if not remote or type(localHashes) ~= "table" then
 		return nil
 	end

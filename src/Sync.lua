@@ -17,19 +17,7 @@ local BUCKET_COUNT = 32
 local TIME_REPLY_GAP = 0.3
 local PATH_REPLY_GAP = 0.5
 
-local started
-local digestTimer
-local periodicTimer
-local lastDigestWhisper = 0
-local peers = {}
-local peerDigestPending = {}
-local lastRumorAt
-local lastRumorKind
-local lastMismatch
 local syncInfoEnabled = false
-local timeReplyQueue = {}
-local pathReplyQueue = {}
-local replyBusy = false
 --------------------------------
 function AddOn:IsSyncInfoEnabled()
 	return syncInfoEnabled == true
@@ -53,35 +41,40 @@ function AddOn:LogSyncFlightReceived(kind, originID, destID, detail, stored)
 	end
 end
 --------------------------------
-local function notePeer(sender)
+local function timerLib(self)
+	return self.Timer or AddOn.Timer
+end
+--------------------------------
+local function notePeer(self, sender)
 	if type(sender) ~= "string" or sender == "" then
 		return
 	end
-	local isNew = peers[sender] == nil
-	peers[sender] = GetTime()
-	if isNew and not peerDigestPending[sender] then
-		peerDigestPending[sender] = true
-		AddOn.Timer:ScheduleTimer(function()
-			peerDigestPending[sender] = nil
-			if started and AddOn:GetShareFlightData() then
-				AddOn:WhisperSyncDigests(sender)
+	local s = self:EnsureSyncState()
+	local isNew = s.peers[sender] == nil
+	s.peers[sender] = GetTime()
+	if isNew and not s.peerDigestPending[sender] then
+		s.peerDigestPending[sender] = true
+		timerLib(self):ScheduleTimer(function()
+			s.peerDigestPending[sender] = nil
+			if s.started and self:GetShareFlightData() then
+				self:WhisperSyncDigests(sender)
 			end
 		end, math.random(PEER_DIGEST_DELAY_MIN, PEER_DIGEST_DELAY_MAX))
 	end
 end
 --------------------------------
-local function peerCount()
+local function peerCount(self)
 	local n = 0
-	for _ in pairs(peers) do
+	for _ in pairs(self:EnsureSyncState().peers) do
 		n = n + 1
 	end
 	return n
 end
 --------------------------------
-local function randomRecentPeer()
+local function randomRecentPeer(self)
 	local now = GetTime()
 	local list = {}
-	for name, seen in pairs(peers) do
+	for name, seen in pairs(self:EnsureSyncState().peers) do
 		if now - seen <= PEER_TTL then
 			list[#list + 1] = name
 		end
@@ -92,41 +85,44 @@ local function randomRecentPeer()
 	return list[math.random(1, #list)]
 end
 --------------------------------
-local function pumpReplyQueue()
-	if replyBusy then
+local function pumpReplyQueue(self)
+	local s = self:EnsureSyncState()
+	if s.replyBusy then
 		return
 	end
 	local job
 	local delay = TIME_REPLY_GAP
-	if #timeReplyQueue > 0 then
-		job = table.remove(timeReplyQueue, 1)
+	if #s.timeReplyQueue > 0 then
+		job = table.remove(s.timeReplyQueue, 1)
 		delay = TIME_REPLY_GAP
-	elseif #pathReplyQueue > 0 then
-		job = table.remove(pathReplyQueue, 1)
+	elseif #s.pathReplyQueue > 0 then
+		job = table.remove(s.pathReplyQueue, 1)
 		delay = PATH_REPLY_GAP
 	end
 	if not job then
 		return
 	end
-	replyBusy = true
+	s.replyBusy = true
 	job()
-	AddOn.Timer:ScheduleTimer(function()
-		replyBusy = false
-		pumpReplyQueue()
+	timerLib(self):ScheduleTimer(function()
+		s.replyBusy = false
+		pumpReplyQueue(self)
 	end, delay)
 end
 --------------------------------
-local function enqueueTimeReply(fn)
-	timeReplyQueue[#timeReplyQueue + 1] = fn
-	pumpReplyQueue()
+local function enqueueTimeReply(self, fn)
+	local s = self:EnsureSyncState()
+	s.timeReplyQueue[#s.timeReplyQueue + 1] = fn
+	pumpReplyQueue(self)
 end
 --------------------------------
-local function enqueuePathReply(fn)
-	pathReplyQueue[#pathReplyQueue + 1] = fn
-	pumpReplyQueue()
+local function enqueuePathReply(self, fn)
+	local s = self:EnsureSyncState()
+	s.pathReplyQueue[#s.pathReplyQueue + 1] = fn
+	pumpReplyQueue(self)
 end
 --------------------------------
-local function sendBatches(msgBuilder, recs, target, pathKind)
+local function sendBatches(self, msgBuilder, recs, target, pathKind)
 	if type(recs) ~= "table" or #recs < 1 or type(target) ~= "string" then
 		return
 	end
@@ -141,16 +137,16 @@ local function sendBatches(msgBuilder, recs, target, pathKind)
 			copy[i] = batch[i]
 		end
 		local builder = msgBuilder
-		enqueue(function()
-			AddOn:WhisperSyncMessage(builder(copy), target, BATCH_ENCODE_LEVEL)
+		enqueue(self, function()
+			self:WhisperSyncMessage(builder(copy), target, BATCH_ENCODE_LEVEL)
 		end)
 		batch = {}
 	end
 	for i = 1, #recs do
 		batch[#batch + 1] = recs[i]
 		local trial = msgBuilder(batch)
-		local encoded = AddOn:SyncEncode(trial, BATCH_ENCODE_LEVEL)
-		if not encoded or #encoded > AddOn:SyncMaxEncoded() then
+		local encoded = self:SyncEncode(trial, BATCH_ENCODE_LEVEL)
+		if not encoded or #encoded > self:SyncMaxEncoded() then
 			batch[#batch] = nil
 			if #batch < 1 then
 				batch = { recs[i] }
@@ -164,123 +160,127 @@ local function sendBatches(msgBuilder, recs, target, pathKind)
 	flush()
 end
 --------------------------------
-local function recordCounts()
-	if AddOn.CountKnownFlightData then
-		return AddOn:CountKnownFlightData()
+local function recordCounts(self)
+	if self.CountKnownFlightData then
+		return self:CountKnownFlightData()
 	end
 	return 0, 0
 end
 --------------------------------
 function AddOn:BuildTimeDigestMessage()
-	local root, buckets = AddOn:GetSyncTimeDigest()
-	local times = recordCounts()
+	local root, buckets = self:GetSyncTimeDigest()
+	local times = recordCounts(self)
 	return {
 		t = "D",
 		k = "t",
 		r = root,
 		n = times,
-		b = AddOn:PackBucketHashes(buckets),
+		b = self:PackBucketHashes(buckets),
 	}
 end
 --------------------------------
 function AddOn:BuildPathDigestMessage()
-	local root, buckets = AddOn:GetSyncPathDigest()
-	local _, paths = recordCounts()
+	local root, buckets = self:GetSyncPathDigest()
+	local _, paths = recordCounts(self)
 	return {
 		t = "D",
 		k = "p",
 		r = root,
 		n = paths,
-		b = AddOn:PackBucketHashes(buckets),
+		b = self:PackBucketHashes(buckets),
 	}
 end
 --------------------------------
 function AddOn:AnnounceSyncPresence()
-	if not started or not AddOn:GetShareFlightData() then
+	local s = self:EnsureSyncState()
+	if not s.started or not self:GetShareFlightData() then
 		return
 	end
-	AddOn:BroadcastSyncMessage({ t = "P" }, 1)
+	self:BroadcastSyncMessage({ t = "P" }, 1)
 end
 --------------------------------
 function AddOn:WhisperSyncDigests(target)
-	if not started or not AddOn:GetShareFlightData() or type(target) ~= "string" then
+	local s = self:EnsureSyncState()
+	if not s.started or not self:GetShareFlightData() or type(target) ~= "string" then
 		return
 	end
-	AddOn:WhisperSyncMessage(AddOn:BuildTimeDigestMessage(), target, 1)
-	if AddOn:GetShareFlightPaths() then
-		AddOn:WhisperSyncMessage(AddOn:BuildPathDigestMessage(), target, 1)
+	self:WhisperSyncMessage(self:BuildTimeDigestMessage(), target, 1)
+	if self:GetShareFlightPaths() then
+		self:WhisperSyncMessage(self:BuildPathDigestMessage(), target, 1)
 	end
-	lastDigestWhisper = GetTime()
+	s.lastDigestWhisper = GetTime()
 end
 --------------------------------
 function AddOn:WhisperSyncDigestsToRandomPeer()
-	local peer = randomRecentPeer()
+	local peer = randomRecentPeer(self)
 	if peer then
-		AddOn:WhisperSyncDigests(peer)
+		self:WhisperSyncDigests(peer)
 		return true
 	end
-	AddOn:AnnounceSyncPresence()
+	self:AnnounceSyncPresence()
 	return false
 end
 --------------------------------
-local function schedulePeriodicAntiEntropy()
-	if periodicTimer then
-		AddOn.Timer:CancelTimer(periodicTimer)
-		periodicTimer = nil
+local function schedulePeriodicAntiEntropy(self)
+	local s = self:EnsureSyncState()
+	if s.periodicTimer then
+		timerLib(self):CancelTimer(s.periodicTimer)
+		s.periodicTimer = nil
 	end
-	if not started then
+	if not s.started then
 		return
 	end
-	periodicTimer = AddOn.Timer:ScheduleTimer(function()
-		periodicTimer = nil
-		if started and AddOn:GetShareFlightData() then
-			AddOn:WhisperSyncDigestsToRandomPeer()
-			schedulePeriodicAntiEntropy()
+	s.periodicTimer = timerLib(self):ScheduleTimer(function()
+		s.periodicTimer = nil
+		if s.started and self:GetShareFlightData() then
+			self:WhisperSyncDigestsToRandomPeer()
+			schedulePeriodicAntiEntropy(self)
 		end
 	end, PERIODIC_DIGEST + math.random(0, PERIODIC_JITTER))
 end
 --------------------------------
-local function handleRumor(msg, sender)
+local function handleRumor(self, msg)
 	local applied = false
 	if msg.k == "t" then
-		applied = AddOn:MergeRemoteFlightTime(msg.o, msg.d, msg.s, msg.n, msg.h)
+		applied = self:MergeRemoteFlightTime(msg.o, msg.d, msg.s, msg.n, msg.h)
 		if applied then
-			AddOn:InfectFlightRumor("t", msg.o, msg.d)
+			self:InfectFlightRumor("t", msg.o, msg.d)
 		end
 	elseif msg.k == "p" then
-		if not AddOn:GetShareFlightPaths() then
+		if not self:GetShareFlightPaths() then
 			return
 		end
-		applied = AddOn:MergeRemoteFlightPath(msg.o, msg.d, msg.n, msg.i, msg.p, msg.h)
+		applied = self:MergeRemoteFlightPath(msg.o, msg.d, msg.n, msg.i, msg.p, msg.h)
 		if applied then
-			AddOn:InfectFlightRumor("p", msg.o, msg.d)
+			self:InfectFlightRumor("p", msg.o, msg.d)
 		end
 	end
 	if applied then
-		lastRumorAt = GetTime()
-		lastRumorKind = msg.k
-		AddOn:InvalidateSyncMerkle()
+		local s = self:EnsureSyncState()
+		s.lastRumorAt = GetTime()
+		s.lastRumorKind = msg.k
+		self:InvalidateSyncMerkle()
 	end
 end
 --------------------------------
-local function handleDigest(msg, sender)
-	if msg.k == "p" and not AddOn:GetShareFlightPaths() then
+local function handleDigest(self, msg, sender)
+	if msg.k == "p" and not self:GetShareFlightPaths() then
 		return
 	end
 	local localRoot, localBuckets
 	if msg.k == "p" then
-		localRoot, localBuckets = AddOn:GetSyncPathDigest()
+		localRoot, localBuckets = self:GetSyncPathDigest()
 	else
-		localRoot, localBuckets = AddOn:GetSyncTimeDigest()
+		localRoot, localBuckets = self:GetSyncTimeDigest()
 	end
 	if msg.r == localRoot then
 		return
 	end
-	if type(msg.b) == "string" and AddOn:SyncAdler32(msg.b) ~= msg.r then
+	if type(msg.b) == "string" and self:SyncAdler32(msg.b) ~= msg.r then
 		return
 	end
 	local remoteN = tonumber(msg.n) or 0
-	local times, paths = recordCounts()
+	local times, paths = recordCounts(self)
 	local localN = times
 	if msg.k == "p" then
 		localN = paths
@@ -288,37 +288,37 @@ local function handleDigest(msg, sender)
 	if remoteN == 0 and localN > 0 then
 		return
 	end
-	local diff = AddOn:DifferingBuckets(localBuckets, msg.b)
+	local diff = self:DifferingBuckets(localBuckets, msg.b)
 	if not diff or #diff < 1 then
 		return
 	end
-	lastMismatch = #diff
+	self:EnsureSyncState().lastMismatch = #diff
 	local kind = msg.k == "p" and "p" or "t"
 	for i = 1, #diff, Q_CHUNK do
 		local chunk = {}
 		for j = i, math.min(i + Q_CHUNK - 1, #diff) do
 			chunk[#chunk + 1] = diff[j]
 		end
-		AddOn:WhisperSyncMessage({ t = "Q", k = kind, i = chunk }, sender, 1)
+		self:WhisperSyncMessage({ t = "Q", k = kind, i = chunk }, sender, 1)
 	end
 end
 --------------------------------
-local function handleBucketQuery(msg, sender)
+local function handleBucketQuery(self, msg, sender)
 	local indices = msg.i
 	if type(indices) ~= "table" then
 		return
 	end
 	local n = math.min(#indices, MAX_IN_INDICES)
 	if msg.k == "p" then
-		if not AddOn:GetShareFlightPaths() then
+		if not self:GetShareFlightPaths() then
 			return
 		end
 		for i = 1, n do
 			local idx = tonumber(indices[i])
 			if idx and idx == math.floor(idx) and idx >= 1 and idx <= BUCKET_COUNT then
-				local recs = AddOn:CollectSyncBucketPathKeys(idx)
+				local recs = self:CollectSyncBucketPathKeys(idx)
 				if recs and #recs > 0 then
-					sendBatches(function(batch)
+					sendBatches(self, function(batch)
 						return { t = "K", k = "p", n = idx, e = batch }
 					end, recs, sender, true)
 				end
@@ -329,9 +329,9 @@ local function handleBucketQuery(msg, sender)
 	for i = 1, n do
 		local idx = tonumber(indices[i])
 		if idx and idx == math.floor(idx) and idx >= 1 and idx <= BUCKET_COUNT then
-			local recs = AddOn:CollectSyncBucketTimes(idx)
+			local recs = self:CollectSyncBucketTimes(idx)
 			if recs and #recs > 0 then
-				sendBatches(function(batch)
+				sendBatches(self, function(batch)
 					return { t = "A", k = "t", recs = batch }
 				end, recs, sender, false)
 			end
@@ -339,7 +339,7 @@ local function handleBucketQuery(msg, sender)
 	end
 end
 --------------------------------
-local function handleTimeBatch(msg)
+local function handleTimeBatch(self, msg)
 	local recs = msg.recs
 	if type(recs) ~= "table" then
 		return
@@ -348,18 +348,18 @@ local function handleTimeBatch(msg)
 	for i = 1, math.min(#recs, MAX_IN_RECS) do
 		local r = recs[i]
 		if type(r) == "table" then
-			if AddOn:MergeRemoteFlightTime(r.o, r.d, r.s, r.n, r.h) then
+			if self:MergeRemoteFlightTime(r.o, r.d, r.s, r.n, r.h) then
 				any = true
 			end
 		end
 	end
 	if any then
-		AddOn:InvalidateSyncMerkle()
+		self:InvalidateSyncMerkle()
 	end
 end
 --------------------------------
-local function handlePathKeys(msg, sender)
-	if not AddOn:GetShareFlightPaths() then
+local function handlePathKeys(self, msg, sender)
+	if not self:GetShareFlightPaths() then
 		return
 	end
 	local entries = msg.e
@@ -372,12 +372,12 @@ local function handlePathKeys(msg, sender)
 		if type(e) == "table" then
 			local o, d = tonumber(e.o), tonumber(e.d)
 			if o and d then
-				local samples, n = AddOn:GetFlightPathMeta(o, d)
+				local samples, n = self:GetFlightPathMeta(o, d)
 				local have
 				if samples then
-					local inst, pts = AddOn:QuantizePathPoints(samples)
+					local inst, pts = self:QuantizePathPoints(samples)
 					if pts then
-						have = AddOn:HashFlightPathPoints(o, d, n, inst, pts)
+						have = self:HashFlightPathPoints(o, d, n, inst, pts)
 					end
 				end
 				if have ~= e.h then
@@ -387,14 +387,14 @@ local function handlePathKeys(msg, sender)
 		end
 	end
 	if #want > 0 then
-		sendBatches(function(batch)
+		sendBatches(self, function(batch)
 			return { t = "G", k = "p", e = batch }
 		end, want, sender, true)
 	end
 end
 --------------------------------
-local function handleGetPath(msg, sender)
-	if not AddOn:GetShareFlightPaths() then
+local function handleGetPath(self, msg, sender)
+	if not self:GetShareFlightPaths() then
 		return
 	end
 	local entries = msg.e
@@ -405,13 +405,13 @@ local function handleGetPath(msg, sender)
 		local e = entries[i]
 		if type(e) == "table" then
 			local o, d = tonumber(e.o), tonumber(e.d)
-			local samples, n = AddOn:GetFlightPathMeta(o, d)
+			local samples, n = self:GetFlightPathMeta(o, d)
 			if samples then
-				local inst, pts = AddOn:QuantizePathPoints(samples)
+				local inst, pts = self:QuantizePathPoints(samples)
 				if pts then
 					local origin, dest, sampleN = o, d, n
-					enqueuePathReply(function()
-						AddOn:WhisperSyncMessage({
+					enqueuePathReply(self, function()
+						self:WhisperSyncMessage({
 							t = "R",
 							k = "p",
 							o = origin,
@@ -419,7 +419,7 @@ local function handleGetPath(msg, sender)
 							n = sampleN,
 							i = inst,
 							p = pts,
-							h = AddOn:HashFlightPathPoints(origin, dest, sampleN, inst, pts),
+							h = self:HashFlightPathPoints(origin, dest, sampleN, inst, pts),
 						}, sender, BATCH_ENCODE_LEVEL)
 					end)
 				end
@@ -432,123 +432,130 @@ function AddOn:HandleFlightSyncMessage(msg, distribution, sender)
 	if type(msg) ~= "table" or type(sender) ~= "string" then
 		return
 	end
-	notePeer(sender)
+	notePeer(self, sender)
 	local t = msg.t
 	if t == "P" then
 		return
 	elseif t == "O" then
 		return
 	elseif t == "R" then
-		handleRumor(msg, sender)
+		handleRumor(self, msg)
 	elseif t == "D" then
-		handleDigest(msg, sender)
+		handleDigest(self, msg, sender)
 	elseif t == "Q" then
-		handleBucketQuery(msg, sender)
+		handleBucketQuery(self, msg, sender)
 	elseif t == "A" then
-		handleTimeBatch(msg)
+		handleTimeBatch(self, msg)
 	elseif t == "K" then
-		handlePathKeys(msg, sender)
+		handlePathKeys(self, msg, sender)
 	elseif t == "G" then
-		handleGetPath(msg, sender)
+		handleGetPath(self, msg, sender)
 	end
 end
 --------------------------------
 function AddOn:OnLocalFlightObservation(kind, originID, destID)
-	AddOn:InvalidateSyncMerkle()
-	if not started or not AddOn:GetShareFlightData() then
+	self:InvalidateSyncMerkle()
+	local s = self:EnsureSyncState()
+	if not s.started or not self:GetShareFlightData() then
 		return
 	end
-	AddOn:InfectFlightRumor(kind, originID, destID)
+	self:InfectFlightRumor(kind, originID, destID)
 end
 --------------------------------
 function AddOn:NotifySyncTaxiMapOpened()
-	if not started then
-		AddOn:StartFlightSync()
+	local s = self:EnsureSyncState()
+	if not s.started then
+		self:StartFlightSync()
 	end
-	if not started or not AddOn:GetShareFlightData() then
+	s = self:EnsureSyncState()
+	if not s.started or not self:GetShareFlightData() then
 		return
 	end
 	local now = GetTime()
-	if now - lastDigestWhisper < TAXI_DIGEST_GAP then
+	if now - s.lastDigestWhisper < TAXI_DIGEST_GAP then
 		return
 	end
-	AddOn:WhisperSyncDigestsToRandomPeer()
+	self:WhisperSyncDigestsToRandomPeer()
 end
 --------------------------------
 function AddOn:PrintSyncStatus()
-	local root = select(1, AddOn:GetSyncTimeDigest())
-	local pathRoot = select(1, AddOn:GetSyncPathDigest())
-	local channel = AddOn:GetSyncChannelId() or 0
-	AddOn:Print(
+	local s = self:EnsureSyncState()
+	local root = select(1, self:GetSyncTimeDigest())
+	local pathRoot = select(1, self:GetSyncPathDigest())
+	local channel = self:GetSyncChannelId() or 0
+	self:Print(
 		string.format(
 			"sync share=%s paths=%s era=%s faction=%s channel=%s peers=%d rumors=%d timeRoot=%s pathRoot=%s mismatch=%s lastRumor=%s",
-			tostring(not not AddOn:GetShareFlightData()),
-			tostring(not not AddOn:GetShareFlightPaths()),
-			tostring(AddOn:GetClientFamily()),
-			tostring(AddOn:GetSyncFaction() or "-"),
+			tostring(not not self:GetShareFlightData()),
+			tostring(not not self:GetShareFlightPaths()),
+			tostring(self:GetClientFamily()),
+			tostring(self:GetSyncFaction() or "-"),
 			tostring(channel),
-			peerCount(),
-			AddOn:GetSyncRumorCount(),
+			peerCount(self),
+			self:GetSyncRumorCount(),
 			tostring(root or "-"),
 			tostring(pathRoot or "-"),
-			tostring(lastMismatch or "-"),
-			lastRumorKind and (lastRumorKind .. "@" .. math.floor(GetTime() - (lastRumorAt or 0)) .. "s") or "-"
+			tostring(s.lastMismatch or "-"),
+			s.lastRumorKind and (s.lastRumorKind .. "@" .. math.floor(GetTime() - (s.lastRumorAt or 0)) .. "s") or "-"
 		)
 	)
-	if started and AddOn:GetShareFlightData() then
-		AddOn:AnnounceSyncPresence()
+	if s.started and self:GetShareFlightData() then
+		self:AnnounceSyncPresence()
 	end
 end
 --------------------------------
 function AddOn:StartFlightSync()
-	if started then
+	local s = self:EnsureSyncState()
+	if s.started then
 		return
 	end
-	if not AddOn:GetShareFlightData() then
+	if not self:GetShareFlightData() then
 		return
 	end
-	if not AddOn:GetSyncFaction() then
+	if not self:GetSyncFaction() then
 		return
 	end
-	started = true
-	AddOn:JoinSyncChannel()
-	AddOn:StartSyncGossip()
-	if digestTimer then
-		AddOn.Timer:CancelTimer(digestTimer)
+	s.started = true
+	self:JoinSyncChannel()
+	self:StartSyncGossip()
+	if s.digestTimer then
+		timerLib(self):CancelTimer(s.digestTimer)
 	end
-	digestTimer = AddOn.Timer:ScheduleTimer(function()
-		digestTimer = nil
-		AddOn:AnnounceSyncPresence()
+	s.digestTimer = timerLib(self):ScheduleTimer(function()
+		s.digestTimer = nil
+		self:AnnounceSyncPresence()
 	end, LOGIN_PING_MIN + math.random(0, LOGIN_PING_SPAN))
-	schedulePeriodicAntiEntropy()
+	schedulePeriodicAntiEntropy(self)
 end
 --------------------------------
 function AddOn:StopFlightSync()
-	started = false
-	AddOn:StopSyncGossip()
-	AddOn:LeaveSyncChannel()
-	if digestTimer then
-		AddOn.Timer:CancelTimer(digestTimer)
-		digestTimer = nil
+	local s = self:EnsureSyncState()
+	s.started = false
+	self:StopSyncGossip()
+	self:LeaveSyncChannel()
+	if s.digestTimer then
+		timerLib(self):CancelTimer(s.digestTimer)
+		s.digestTimer = nil
 	end
-	if periodicTimer then
-		AddOn.Timer:CancelTimer(periodicTimer)
-		periodicTimer = nil
+	if s.periodicTimer then
+		timerLib(self):CancelTimer(s.periodicTimer)
+		s.periodicTimer = nil
 	end
-	wipe(peers)
-	wipe(peerDigestPending)
-	wipe(timeReplyQueue)
-	wipe(pathReplyQueue)
-	replyBusy = false
+	wipe(s.peers)
+	wipe(s.peerDigestPending)
+	wipe(s.timeReplyQueue)
+	wipe(s.pathReplyQueue)
+	s.replyBusy = false
 end
 --------------------------------
 function AddOn:InitSync()
-	AddOn:InitSyncTransport()
-	AddOn:AddMessageHandler(AddOn.Message.ENABLE_ADDON, function()
-		AddOn:StartFlightSync()
+	self:EnsureSyncState()
+	self:InitSyncTransport()
+	self:AddMessageHandler(self.Message.ENABLE_ADDON, function()
+		self:StartFlightSync()
 	end)
-	AddOn:AddMessageHandler(AddOn.Message.DISABLE_ADDON, function()
-		AddOn:StopFlightSync()
+	self:AddMessageHandler(self.Message.DISABLE_ADDON, function()
+		self:StopFlightSync()
 	end)
-	AddOn:StartFlightSync()
+	self:StartFlightSync()
 end

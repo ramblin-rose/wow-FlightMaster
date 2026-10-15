@@ -1148,8 +1148,14 @@ function AddOn:OnSlashCommand(...)
 		end
 	elseif arg1 == "count" then
 		AddOn:PrintFlightDataCount()
+	elseif arg1 == "view" then
+		AddOn:ShowFlightDataView()
 	elseif arg1 == "syncinfo" then
 		AddOn:ToggleSyncInfo()
+	elseif arg1 == "synctest" then
+		if AddOn.RunSyncConvergeTest then
+			AddOn:RunSyncConvergeTest()
+		end
 	else
 		AddOn:OpenOptions()
 	end
@@ -1310,18 +1316,18 @@ function AddOn:SetShowSmoothRoutes(val)
 end
 --------------------------------
 function AddOn:SetShareFlightData(val)
-	AddOn.db.global.shareFlightData = not not val
+	self.db.global.shareFlightData = not not val
 	if val then
-		if AddOn.StartFlightSync then
-			AddOn:StartFlightSync()
+		if self.StartFlightSync then
+			self:StartFlightSync()
 		end
-	elseif AddOn.StopFlightSync then
-		AddOn:StopFlightSync()
+	elseif self.StopFlightSync then
+		self:StopFlightSync()
 	end
 end
 --------------------------------
 function AddOn:GetShareFlightData()
-	local val = AddOn.db and AddOn.db.global and AddOn.db.global.shareFlightData
+	local val = self.db and self.db.global and self.db.global.shareFlightData
 	if val == nil then
 		return true
 	end
@@ -1329,11 +1335,11 @@ function AddOn:GetShareFlightData()
 end
 --------------------------------
 function AddOn:SetShareFlightPaths(val)
-	AddOn.db.global.shareFlightPaths = not not val
+	self.db.global.shareFlightPaths = not not val
 end
 --------------------------------
 function AddOn:GetShareFlightPaths()
-	local val = AddOn.db and AddOn.db.global and AddOn.db.global.shareFlightPaths
+	local val = self.db and self.db.global and self.db.global.shareFlightPaths
 	if val == nil then
 		return true
 	end

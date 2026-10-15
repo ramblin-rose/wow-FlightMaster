@@ -34,29 +34,29 @@ function AddOn:MergeRemoteFlightTime(originID, destID, seconds, n, hash)
 		return false
 	end
 	if type(hash) == "number" then
-		local expected = AddOn:HashFlightTimeRecord(originID, destID, seconds, n)
+		local expected = self:HashFlightTimeRecord(originID, destID, seconds, n)
 		if hash ~= expected then
 			return false
 		end
 	end
-	local localSeconds, localN = AddOn:GetFlightTimeMeta(originID, destID)
+	local localSeconds, localN = self:GetFlightTimeMeta(originID, destID)
 	if localSeconds then
-		if hash and hash == AddOn:HashFlightTimeRecord(originID, destID, localSeconds, localN) then
-			if AddOn.LogSyncFlightReceived then
-				AddOn:LogSyncFlightReceived("t", originID, destID, seconds, false)
+		if hash and hash == self:HashFlightTimeRecord(originID, destID, localSeconds, localN) then
+			if self.LogSyncFlightReceived then
+				self:LogSyncFlightReceived("t", originID, destID, seconds, false)
 			end
 			return false
 		end
 		if n <= (localN or 1) then
-			if AddOn.LogSyncFlightReceived then
-				AddOn:LogSyncFlightReceived("t", originID, destID, seconds, false)
+			if self.LogSyncFlightReceived then
+				self:LogSyncFlightReceived("t", originID, destID, seconds, false)
 			end
 			return false
 		end
 	end
-	AddOn:ApplySyncedFlightTime(originID, destID, seconds, n)
-	if AddOn.LogSyncFlightReceived then
-		AddOn:LogSyncFlightReceived("t", originID, destID, seconds, true)
+	self:ApplySyncedFlightTime(originID, destID, seconds, n)
+	if self.LogSyncFlightReceived then
+		self:LogSyncFlightReceived("t", originID, destID, seconds, true)
 	end
 	return true
 end
@@ -79,33 +79,33 @@ function AddOn:MergeRemoteFlightPath(originID, destID, n, instanceID, pts, hash)
 		return false
 	end
 	if type(hash) == "number" then
-		local expected = AddOn:HashFlightPathPoints(originID, destID, n, instanceID, pts)
+		local expected = self:HashFlightPathPoints(originID, destID, n, instanceID, pts)
 		if hash ~= expected then
 			return false
 		end
 	end
-	local samples = AddOn:ExpandPathPoints(instanceID, pts)
+	local samples = self:ExpandPathPoints(instanceID, pts)
 	if not samples then
 		return false
 	end
-	local localSamples, localN = AddOn:GetFlightPathMeta(originID, destID)
+	local localSamples, localN = self:GetFlightPathMeta(originID, destID)
 	if localSamples then
 		if #localSamples > #samples then
-			if AddOn.LogSyncFlightReceived then
-				AddOn:LogSyncFlightReceived("p", originID, destID, #samples, false)
+			if self.LogSyncFlightReceived then
+				self:LogSyncFlightReceived("p", originID, destID, #samples, false)
 			end
 			return false
 		end
 		if #localSamples == #samples and (localN or 1) >= n then
-			if AddOn.LogSyncFlightReceived then
-				AddOn:LogSyncFlightReceived("p", originID, destID, #samples, false)
+			if self.LogSyncFlightReceived then
+				self:LogSyncFlightReceived("p", originID, destID, #samples, false)
 			end
 			return false
 		end
 	end
-	AddOn:ApplySyncedFlightPath(originID, destID, samples, n)
-	if AddOn.LogSyncFlightReceived then
-		AddOn:LogSyncFlightReceived("p", originID, destID, #samples, true)
+	self:ApplySyncedFlightPath(originID, destID, samples, n)
+	if self.LogSyncFlightReceived then
+		self:LogSyncFlightReceived("p", originID, destID, #samples, true)
 	end
 	return true
 end

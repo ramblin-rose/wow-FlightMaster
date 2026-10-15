@@ -24,12 +24,15 @@
   <Include file="Message.lua" />
   <Include file="Route.lua" />  
   <Include file="TaxiLog.lua" />
+  <Include file="FlightDataView.lua" />
+  <Include file="Sync\State.lua" />
   <Include file="Sync\Codec.lua" />
   <Include file="Sync\Transport.lua" />
   <Include file="Sync\Merkle.lua" />
   <Include file="Sync\Gossip.lua" />
   <Include file="Sync\Merge.lua" />
   <Include file="Sync.lua" />
+  <Include file="Sync\ConvergeTest.lua" />
   <Include file="SmoothRoute.lua" />
   <Include file="TaxiTimer.lua" />
   <Include file="Compatibility.lua" />

@@ -38,11 +38,25 @@ function configure(cb) {
     .pipe(touch());
 }
 //////////////////////////////////
-function codes(cb) {
+const TEST_LUA_GLOB = "!src/Sync/ConvergeTest.lua";
+const TEST_EMBED = /^[ \t]*<Include file="Sync\\ConvergeTest.lua" \/>\r?\n/gm;
+
+function copyCodes(includeTest) {
   const output = path.join("build", util.name);
-  return src(["src/**/*.lua", "src/**/*.xml"], { ignoreInitial: false })
-    .pipe(dest(output))
-    .pipe(touch());
+  const globs = includeTest
+    ? ["src/**/*.lua", "src/**/*.xml"]
+    : ["src/**/*.lua", "src/**/*.xml", TEST_LUA_GLOB];
+  const stream = src(globs, { ignoreInitial: false });
+  if (!includeTest) {
+    return stream.pipe(replace(TEST_EMBED, "")).pipe(dest(output)).pipe(touch());
+  }
+  return stream.pipe(dest(output)).pipe(touch());
+}
+function codes() {
+  return copyCodes(true);
+}
+function codesRelease() {
+  return copyCodes(false);
 }
 function attributions(cb) {
   const output = path.join("build", util.name);
@@ -165,4 +179,12 @@ export function archive(cb) {
   }, 1000);
 }
 //////////////////////////////////
-export const build = series(clean, codes, assets, toc, attributions, archive);
+export const test = series(codes, assets, toc, addons);
+export const build = series(
+  clean,
+  codesRelease,
+  assets,
+  toc,
+  attributions,
+  archive,
+);

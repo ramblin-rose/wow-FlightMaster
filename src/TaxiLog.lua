@@ -64,29 +64,29 @@ local function factionStoreValid(store, era, mapKey)
 		and type(store[mapKey]) == "table"
 end
 --------------------------------
-local function ensureFactionStore(field, mapKey)
-	if not AddOn.db or not AddOn.db.faction then
+local function ensureFactionStore(owner, field, mapKey)
+	if not owner or not owner.db or not owner.db.faction then
 		return nil
 	end
-	local era = AddOn:GetClientFamily()
-	local store = AddOn.db.faction[field]
+	local era = owner:GetClientFamily()
+	local store = owner.db.faction[field]
 	if not factionStoreValid(store, era, mapKey) then
 		store = {
 			version = FLIGHT_DATA_VERSION,
 			era = era,
 			[mapKey] = {},
 		}
-		AddOn.db.faction[field] = store
+		owner.db.faction[field] = store
 	end
 	return store
 end
 --------------------------------
-local function ensureStore()
-	return ensureFactionStore("flightTimes", "times")
+local function ensureStore(owner)
+	return ensureFactionStore(owner, "flightTimes", "times")
 end
 --------------------------------
-local function ensurePathStore()
-	return ensureFactionStore("flightPaths", "paths")
+local function ensurePathStore(owner)
+	return ensureFactionStore(owner, "flightPaths", "paths")
 end
 --------------------------------
 local function readTimeRecord(value)
@@ -109,9 +109,9 @@ local function readPathRecord(value)
 	end
 end
 --------------------------------
-local function notifyObservation(kind, originID, destID)
-	if AddOn.OnLocalFlightObservation then
-		AddOn:OnLocalFlightObservation(kind, originID, destID)
+local function notifyObservation(owner, kind, originID, destID)
+	if owner.OnLocalFlightObservation then
+		owner:OnLocalFlightObservation(kind, originID, destID)
 	end
 end
 --------------------------------
@@ -124,6 +124,117 @@ function AddOn:GetTaxiNodeID(node)
 	if id and id > 0 then
 		return id
 	end
+end
+--------------------------------
+local nodeNameByID = {}
+local nodeNameCacheReady = false
+
+local function rememberTaxiNodeName(node)
+	local id = AddOn:GetTaxiNodeID(node)
+	if id and type(node.name) == "string" and node.name ~= "" then
+		nodeNameByID[id] = node.name
+	end
+end
+
+local function ingestTaxiNodeNames(nodes)
+	if type(nodes) ~= "table" then
+		return
+	end
+	for _, node in ipairs(nodes) do
+		rememberTaxiNodeName(node)
+	end
+end
+
+local function addTaxiNameMapID(ids, seen, mapID)
+	mapID = tonumber(mapID)
+	if mapID and mapID > 0 and not seen[mapID] then
+		seen[mapID] = true
+		ids[#ids + 1] = mapID
+	end
+end
+
+local function taxiNodeNameMapIDs()
+	local ids, seen = {}, {}
+	if AddOn.mapInfo then
+		addTaxiNameMapID(ids, seen, AddOn.mapInfo.mapID)
+	end
+	if AddOn.GetPlayerContinentMapID then
+		addTaxiNameMapID(ids, seen, AddOn:GetPlayerContinentMapID())
+	end
+	if C_Map and C_Map.GetBestMapForUnit then
+		addTaxiNameMapID(ids, seen, C_Map.GetBestMapForUnit("player"))
+	end
+	if not C_Map or not C_Map.GetMapInfo then
+		return ids
+	end
+	local mapID = ids[1]
+	if not mapID then
+		return ids
+	end
+	for _ = 1, 16 do
+		local info = C_Map.GetMapInfo(mapID)
+		if not info or not info.parentMapID or info.parentMapID == 0 then
+			break
+		end
+		mapID = info.parentMapID
+		addTaxiNameMapID(ids, seen, mapID)
+	end
+	if C_Map.GetMapChildrenInfo then
+		local mapType = AddOn.GetContinentMapType and AddOn:GetContinentMapType() or 2
+		local ok, children = pcall(C_Map.GetMapChildrenInfo, mapID, mapType)
+		if ok and type(children) == "table" then
+			for i = 1, #children do
+				addTaxiNameMapID(ids, seen, children[i].mapID)
+			end
+		end
+	end
+	return ids
+end
+
+function AddOn:RefreshTaxiNodeNameCache()
+	wipe(nodeNameByID)
+	if AddOn.originTaxiNode then
+		rememberTaxiNodeName(AddOn.originTaxiNode)
+	end
+	if type(AddOn.taxiNodePositions) == "table" then
+		for _, node in pairs(AddOn.taxiNodePositions) do
+			rememberTaxiNodeName(node)
+		end
+	end
+	if C_TaxiMap then
+		local mapIDs = taxiNodeNameMapIDs()
+		for i = 1, #mapIDs do
+			local mapID = mapIDs[i]
+			if C_TaxiMap.GetTaxiNodesForMap then
+				local ok, nodes = pcall(C_TaxiMap.GetTaxiNodesForMap, mapID)
+				if ok then
+					ingestTaxiNodeNames(nodes)
+				end
+			end
+			if C_TaxiMap.GetAllTaxiNodes then
+				local ok, nodes = pcall(C_TaxiMap.GetAllTaxiNodes, mapID)
+				if ok then
+					ingestTaxiNodeNames(nodes)
+				end
+			end
+		end
+	end
+	nodeNameCacheReady = true
+end
+
+function AddOn:GetTaxiNodeName(nodeID)
+	nodeID = tonumber(nodeID)
+	if not nodeID then
+		return nil
+	end
+	local name = nodeNameByID[nodeID]
+	if name then
+		return name
+	end
+	if not nodeNameCacheReady then
+		AddOn:RefreshTaxiNodeNameCache()
+	end
+	return nodeNameByID[nodeID]
 end
 --------------------------------
 local function lookupNodeIDFromNodes(nodes, name)
@@ -244,7 +355,7 @@ function AddOn:GetFlightTimeMeta(originNodeID, destNodeID)
 	if not originNodeID or not destNodeID then
 		return nil
 	end
-	local store = ensureStore()
+	local store = ensureStore(self)
 	if not store then
 		return nil
 	end
@@ -253,23 +364,23 @@ function AddOn:GetFlightTimeMeta(originNodeID, destNodeID)
 end
 --------------------------------
 function AddOn:GetFlightTime(originNodeID, destNodeID)
-	local seconds = AddOn:GetFlightTimeMeta(originNodeID, destNodeID)
+	local seconds = self:GetFlightTimeMeta(originNodeID, destNodeID)
 	return seconds
 end
 --------------------------------
 function AddOn:GetFlightTimeOrReverse(originNodeID, destNodeID)
-	local known = AddOn:GetFlightTime(originNodeID, destNodeID)
+	local known = self:GetFlightTime(originNodeID, destNodeID)
 	if known then
 		return known, false
 	end
-	local reverse = AddOn:GetFlightTime(destNodeID, originNodeID)
+	local reverse = self:GetFlightTime(destNodeID, originNodeID)
 	if reverse then
 		return reverse, true
 	end
 end
 --------------------------------
-local function writeTimeRecord(originNodeID, destNodeID, seconds, n, silent)
-	local store = ensureStore()
+local function writeTimeRecord(owner, originNodeID, destNodeID, seconds, n, silent)
+	local store = ensureStore(owner)
 	if not store then
 		return false
 	end
@@ -280,9 +391,9 @@ local function writeTimeRecord(originNodeID, destNodeID, seconds, n, silent)
 	end
 	from[destNodeID] = { seconds = seconds, n = n }
 	if not silent then
-		notifyObservation("t", originNodeID, destNodeID)
-	elseif AddOn.InvalidateSyncMerkle then
-		AddOn:InvalidateSyncMerkle()
+		notifyObservation(owner, "t", originNodeID, destNodeID)
+	elseif owner.InvalidateSyncMerkle then
+		owner:InvalidateSyncMerkle()
 	end
 	return true
 end
@@ -294,7 +405,7 @@ function AddOn:SetFlightTime(originNodeID, destNodeID, seconds)
 	if not originNodeID or not destNodeID or seconds < 1 then
 		return
 	end
-	local oldSeconds, oldN = AddOn:GetFlightTimeMeta(originNodeID, destNodeID)
+	local oldSeconds, oldN = self:GetFlightTimeMeta(originNodeID, destNodeID)
 	local n = 1
 	if oldSeconds then
 		if math.abs(oldSeconds - seconds) / oldSeconds < 0.15 then
@@ -304,7 +415,7 @@ function AddOn:SetFlightTime(originNodeID, destNodeID, seconds)
 			n = oldN or 1
 		end
 	end
-	writeTimeRecord(originNodeID, destNodeID, seconds, n, false)
+	writeTimeRecord(self, originNodeID, destNodeID, seconds, n, false)
 end
 --------------------------------
 function AddOn:ApplySyncedFlightTime(originNodeID, destNodeID, seconds, n)
@@ -315,14 +426,14 @@ function AddOn:ApplySyncedFlightTime(originNodeID, destNodeID, seconds, n)
 	if not originNodeID or not destNodeID or seconds < 1 then
 		return
 	end
-	writeTimeRecord(originNodeID, destNodeID, seconds, n, true)
+	writeTimeRecord(self, originNodeID, destNodeID, seconds, n, true)
 end
 --------------------------------
 function AddOn:ForEachFlightTime(fn)
 	if type(fn) ~= "function" then
 		return
 	end
-	local store = ensureStore()
+	local store = ensureStore(self)
 	if not store or type(store.times) ~= "table" then
 		return
 	end
@@ -375,7 +486,7 @@ function AddOn:GetFlightPathMeta(originNodeID, destNodeID)
 	if not originNodeID or not destNodeID then
 		return nil
 	end
-	local store = ensurePathStore()
+	local store = ensurePathStore(self)
 	if not store then
 		return nil
 	end
@@ -384,7 +495,7 @@ function AddOn:GetFlightPathMeta(originNodeID, destNodeID)
 end
 --------------------------------
 function AddOn:GetFlightPath(originNodeID, destNodeID)
-	local samples = AddOn:GetFlightPathMeta(originNodeID, destNodeID)
+	local samples = self:GetFlightPathMeta(originNodeID, destNodeID)
 	return samples
 end
 --------------------------------
@@ -407,8 +518,8 @@ local function copyPathSamples(samples)
 	return copy
 end
 --------------------------------
-local function writePathRecord(originNodeID, destNodeID, samples, n, silent)
-	local store = ensurePathStore()
+local function writePathRecord(owner, originNodeID, destNodeID, samples, n, silent)
+	local store = ensurePathStore(owner)
 	if not store then
 		return false
 	end
@@ -419,9 +530,9 @@ local function writePathRecord(originNodeID, destNodeID, samples, n, silent)
 	end
 	from[destNodeID] = { samples = samples, n = n }
 	if not silent then
-		notifyObservation("p", originNodeID, destNodeID)
-	elseif AddOn.InvalidateSyncMerkle then
-		AddOn:InvalidateSyncMerkle()
+		notifyObservation(owner, "p", originNodeID, destNodeID)
+	elseif owner.InvalidateSyncMerkle then
+		owner:InvalidateSyncMerkle()
 	end
 	return true
 end
@@ -436,8 +547,8 @@ function AddOn:SetFlightPath(originNodeID, destNodeID, samples)
 	if not copy then
 		return
 	end
-	local _, oldN = AddOn:GetFlightPathMeta(originNodeID, destNodeID)
-	writePathRecord(originNodeID, destNodeID, copy, (oldN or 0) + 1, false)
+	local _, oldN = self:GetFlightPathMeta(originNodeID, destNodeID)
+	writePathRecord(self, originNodeID, destNodeID, copy, (oldN or 0) + 1, false)
 end
 --------------------------------
 function AddOn:ApplySyncedFlightPath(originNodeID, destNodeID, samples, n)
@@ -451,14 +562,14 @@ function AddOn:ApplySyncedFlightPath(originNodeID, destNodeID, samples, n)
 	if not copy then
 		return
 	end
-	writePathRecord(originNodeID, destNodeID, copy, n, true)
+	writePathRecord(self, originNodeID, destNodeID, copy, n, true)
 end
 --------------------------------
 function AddOn:ForEachFlightPath(fn)
 	if type(fn) ~= "function" then
 		return
 	end
-	local store = ensurePathStore()
+	local store = ensurePathStore(self)
 	if not store or type(store.paths) ~= "table" then
 		return
 	end
@@ -478,31 +589,58 @@ end
 --------------------------------
 function AddOn:CountKnownFlightData()
 	local times, paths = 0, 0
-	AddOn:ForEachFlightTime(function()
+	self:ForEachFlightTime(function()
 		times = times + 1
 	end)
-	AddOn:ForEachFlightPath(function()
+	self:ForEachFlightPath(function()
 		paths = paths + 1
 	end)
 	return times, paths
 end
 --------------------------------
+function AddOn:GetKnownFlightPairs()
+	local byKey = {}
+	local list = {}
+	local function pair(origin, dest)
+		local key = origin .. ":" .. dest
+		local row = byKey[key]
+		if not row then
+			row = {
+				originNodeID = origin,
+				destNodeID = dest,
+				seconds = nil,
+				hasPath = false,
+			}
+			byKey[key] = row
+			list[#list + 1] = row
+		end
+		return row
+	end
+	self:ForEachFlightTime(function(origin, dest, seconds)
+		pair(origin, dest).seconds = seconds
+	end)
+	self:ForEachFlightPath(function(origin, dest)
+		pair(origin, dest).hasPath = true
+	end)
+	return list
+end
+--------------------------------
 function AddOn:PrintFlightDataCount()
-	local times, paths = AddOn:CountKnownFlightData()
-	AddOn:Print(string.format(AddOn.L.flightDataCount, times, paths))
+	local times, paths = self:CountKnownFlightData()
+	self:Print(string.format(self.L.flightDataCount, times, paths))
 end
 --------------------------------
 function AddOn:WipeFactionFlightTimes()
-	local store = ensureStore()
+	local store = ensureStore(self)
 	if store then
 		store.times = {}
 	end
-	local paths = ensurePathStore()
+	local paths = ensurePathStore(self)
 	if paths then
 		paths.paths = {}
 	end
-	if AddOn.InvalidateSyncMerkle then
-		AddOn:InvalidateSyncMerkle()
+	if self.InvalidateSyncMerkle then
+		self:InvalidateSyncMerkle()
 	end
 end
 --------------------------------
@@ -900,10 +1038,10 @@ function AddOn:InitTaxiLog()
 		AddOn.db.global.flightTimes = nil
 		AddOn.db.global.flightPaths = nil
 	end
-	ensureStore()
-	ensurePathStore()
-	if AddOn.InvalidateSyncMerkle then
-		AddOn:InvalidateSyncMerkle()
+	ensureStore(self)
+	ensurePathStore(self)
+	if self.InvalidateSyncMerkle then
+		self:InvalidateSyncMerkle()
 	end
 
 	AddOn:SecureHook("TaxiRequestEarlyLanding", invalidateFlightTimeSample)

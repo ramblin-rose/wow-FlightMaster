@@ -180,8 +180,8 @@ function AddOn:SyncEncode(msg, level)
 		return nil
 	end
 	msg.v = msg.v or 1
-	msg.era = msg.era or AddOn:GetClientFamily()
-	msg.fac = msg.fac or AddOn:GetSyncFaction()
+	msg.era = msg.era or self:GetClientFamily()
+	msg.fac = msg.fac or self:GetSyncFaction()
 	local ok, plain = pcall(serialize.Serialize, serialize, msg)
 	if not ok or type(plain) ~= "string" then
 		return nil

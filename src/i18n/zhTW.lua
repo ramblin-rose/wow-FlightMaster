@@ -78,6 +78,12 @@ L.oggRingo = "Ring-O"
 L.oggSerious = "嚴肅"
 L.oggSmile = "微笑"
 L.learningFlightTime = "正在學習飛行路徑"
+L.flightDataViewTitle = "已知飛行路徑"
+L.flightDataViewPathsKnown = "已知路徑：%d"
+L.flightDataViewOrigin = "起點"
+L.flightDataViewDestination = "終點"
+L.flightDataViewTime = "時間"
+L.flightDataViewPath = "路徑"
 
 -- stylua: ignore start
 L.configAutoCancelShapeShiftDesc = [[

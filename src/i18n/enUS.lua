@@ -98,6 +98,12 @@ L.syncInfoTime = "Received flight time %d → %d (%ds) [%s]"
 L.syncInfoPath = "Received flight path %d → %d (%d points) [%s]"
 L.syncInfoStored = "stored"
 L.syncInfoIgnored = "ignored"
+L.flightDataViewTitle = "Known Flight Paths"
+L.flightDataViewPathsKnown = "Paths known: %d"
+L.flightDataViewOrigin = "Origin"
+L.flightDataViewDestination = "Destination"
+L.flightDataViewTime = "Time"
+L.flightDataViewPath = "Path"
 
 -- stylua: ignore start
 L.configAutoCancelShapeShiftDesc = [[
