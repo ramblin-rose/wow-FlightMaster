@@ -1,60 +1,1054 @@
--- This feature is in an intermediary state and is not ready for beta
---The inverse of travel time from point A to point B is not always equal
+-- Directed origin→destination flight times and paths, keyed by C_TaxiMap nodeID
+-- (TaxiNodes DBC id). Session slots and localized names are never persisted.
+-- Missing A→B may use B→A as an estimate, for any hop count. Hop-sum is also an estimate.
 local AddOn = _G[select(1, ...)]
 --------------------------------
-local taxiRequestEarlyLanding = false
---------------------------------
-function AddOn:InitTaxiLog()
-	AddOn.db.global.taxiLog = AddOn.db.global.taxiLog or {}
+local FLIGHT_DATA_VERSION = 1
+local TAKEOFF_INTERVAL = 0.1
+local TAKEOFF_TIMEOUT = 15
+local PATH_SAMPLE_INTERVAL = 5
 
-	AddOn:AddMessageHandler(AddOn.Message.TAXI_START, function(...)
-		AddOn:onTaxiStart(...)
-	end)
-	-- invalidate logging if early landing requested
-	AddOn:SecureHook("TaxiRequestEarlyLanding", function()
-		taxiRequestEarlyLanding = true
-	end)
+local pending
+local watchTimer
+local pathTimer
+local controlEventRegistered
+local normalizePathSamples
+--------------------------------
+function AddOn:GetClientFamily()
+	local build = select(4, GetBuildInfo())
+	if type(build) ~= "number" or build < 20000 then
+		return "classic-era"
+	end
+	if build < 50000 then
+		return "tbc"
+	end
+	return "mop"
 end
 --------------------------------
-function AddOn:onTaxiStart(mapID, key)
-	local startTime = GetTime()
-
-	taxiRequestEarlyLanding = false
-
-	AddOn:RegisterEvent("PLAYER_CONTROL_GAINED", function()
-		-- AddOn:onTaxiEnd(mapID, key, startTime)
-	end)
+function AddOn:GetPlayerFaction()
+	local faction = UnitFactionGroup("player")
+	if faction == "Alliance" or faction == "Horde" then
+		return faction
+	end
+	return "Neutral"
 end
 --------------------------------
-function AddOn:onTaxiEnd(mapID, key, startTime)
-	AddOn:UnregisterEvent("PLAYER_CONTROL_GAINED")
-
-	if taxiRequestEarlyLanding == false then
-		-- AddOn:LogTravelTime(mapID, key, GetTime() - startTime)
+function AddOn:GetSyncFaction()
+	local faction = UnitFactionGroup("player")
+	if faction == "Alliance" or faction == "Horde" then
+		return faction
 	end
 end
 --------------------------------
-local util = AddOn.Utility
-function AddOn:GetTaxiLogKey(startPos, endPos)
-	return util.round(startPos.x * 100)
-		.. ","
-		.. util.round(startPos.y * 100)
-		.. "|"
-		.. util.round(endPos.x * 100)
-		.. ","
-		.. util.round(endPos.y * 100)
+local function tableGet(t, key)
+	if type(t) ~= "table" or key == nil then
+		return nil
+	end
+	local value = t[key]
+	if value ~= nil then
+		return value
+	end
+	if type(key) == "number" then
+		return t[tostring(key)]
+	end
+	local asNumber = tonumber(key)
+	if asNumber then
+		return t[asNumber]
+	end
 end
 --------------------------------
-function AddOn:LogTravelTime(mapID, key, timeSpan)
-	local db = AddOn.db.global.taxiLog
-	db[mapID] = db[mapID] or {}
-	db[mapID][key] = util.round(timeSpan)
-	return db[mapID][key]
+local function factionStoreValid(store, era, mapKey)
+	return type(store) == "table"
+		and store.version == FLIGHT_DATA_VERSION
+		and store.era == era
+		and type(store[mapKey]) == "table"
 end
 --------------------------------
-function AddOn:GetTravelTime(mapID, key)
-	local db = AddOn.db.global.taxiLog
-	if db[mapID] then
-		return db[mapID][key]
+local function ensureFactionStore(owner, field, mapKey)
+	if not owner or not owner.db or not owner.db.faction then
+		return nil
+	end
+	local era = owner:GetClientFamily()
+	local store = owner.db.faction[field]
+	if not factionStoreValid(store, era, mapKey) then
+		store = {
+			version = FLIGHT_DATA_VERSION,
+			era = era,
+			[mapKey] = {},
+		}
+		owner.db.faction[field] = store
+	end
+	return store
+end
+--------------------------------
+local function ensureStore(owner)
+	return ensureFactionStore(owner, "flightTimes", "times")
+end
+--------------------------------
+local function ensurePathStore(owner)
+	return ensureFactionStore(owner, "flightPaths", "paths")
+end
+--------------------------------
+local function readTimeRecord(value)
+	if type(value) ~= "table" then
+		return nil
+	end
+	local seconds = tonumber(value.seconds)
+	if seconds and seconds > 0 then
+		return seconds, math.max(1, math.floor(tonumber(value.n) or 1))
+	end
+end
+--------------------------------
+local function readPathRecord(value)
+	if type(value) ~= "table" or not value.samples then
+		return nil
+	end
+	local samples = normalizePathSamples(value.samples)
+	if samples then
+		return samples, math.max(1, math.floor(tonumber(value.n) or 1))
+	end
+end
+--------------------------------
+local function notifyObservation(owner, kind, originID, destID)
+	if owner.OnLocalFlightObservation then
+		owner:OnLocalFlightObservation(kind, originID, destID)
+	end
+end
+--------------------------------
+function AddOn:GetTaxiNodeID(node)
+	if type(node) ~= "table" then
+		return nil
+	end
+	-- TaxiNodes DBC id only. Never session slot or C_TaxiMap.slotIndex.
+	local id = tonumber(node.nodeID)
+	if id and id > 0 then
+		return id
+	end
+end
+--------------------------------
+local nodeNameByID = {}
+local nodeNameCacheReady = false
+
+local function rememberTaxiNodeName(node)
+	local id = AddOn:GetTaxiNodeID(node)
+	if id and type(node.name) == "string" and node.name ~= "" then
+		nodeNameByID[id] = node.name
+	end
+end
+
+local function ingestTaxiNodeNames(nodes)
+	if type(nodes) ~= "table" then
+		return
+	end
+	for _, node in ipairs(nodes) do
+		rememberTaxiNodeName(node)
+	end
+end
+
+local function addTaxiNameMapID(ids, seen, mapID)
+	mapID = tonumber(mapID)
+	if mapID and mapID > 0 and not seen[mapID] then
+		seen[mapID] = true
+		ids[#ids + 1] = mapID
+	end
+end
+
+local function taxiNodeNameMapIDs()
+	local ids, seen = {}, {}
+	if AddOn.mapInfo then
+		addTaxiNameMapID(ids, seen, AddOn.mapInfo.mapID)
+	end
+	if AddOn.GetPlayerContinentMapID then
+		addTaxiNameMapID(ids, seen, AddOn:GetPlayerContinentMapID())
+	end
+	if C_Map and C_Map.GetBestMapForUnit then
+		addTaxiNameMapID(ids, seen, C_Map.GetBestMapForUnit("player"))
+	end
+	if not C_Map or not C_Map.GetMapInfo then
+		return ids
+	end
+	local mapID = ids[1]
+	if not mapID then
+		return ids
+	end
+	for _ = 1, 16 do
+		local info = C_Map.GetMapInfo(mapID)
+		if not info or not info.parentMapID or info.parentMapID == 0 then
+			break
+		end
+		mapID = info.parentMapID
+		addTaxiNameMapID(ids, seen, mapID)
+	end
+	if C_Map.GetMapChildrenInfo then
+		local mapType = AddOn.GetContinentMapType and AddOn:GetContinentMapType() or 2
+		local ok, children = pcall(C_Map.GetMapChildrenInfo, mapID, mapType)
+		if ok and type(children) == "table" then
+			for i = 1, #children do
+				addTaxiNameMapID(ids, seen, children[i].mapID)
+			end
+		end
+	end
+	return ids
+end
+
+function AddOn:RefreshTaxiNodeNameCache()
+	wipe(nodeNameByID)
+	if AddOn.originTaxiNode then
+		rememberTaxiNodeName(AddOn.originTaxiNode)
+	end
+	if type(AddOn.taxiNodePositions) == "table" then
+		for _, node in pairs(AddOn.taxiNodePositions) do
+			rememberTaxiNodeName(node)
+		end
+	end
+	if C_TaxiMap then
+		local mapIDs = taxiNodeNameMapIDs()
+		for i = 1, #mapIDs do
+			local mapID = mapIDs[i]
+			if C_TaxiMap.GetTaxiNodesForMap then
+				local ok, nodes = pcall(C_TaxiMap.GetTaxiNodesForMap, mapID)
+				if ok then
+					ingestTaxiNodeNames(nodes)
+				end
+			end
+			if C_TaxiMap.GetAllTaxiNodes then
+				local ok, nodes = pcall(C_TaxiMap.GetAllTaxiNodes, mapID)
+				if ok then
+					ingestTaxiNodeNames(nodes)
+				end
+			end
+		end
+	end
+	nodeNameCacheReady = true
+end
+
+function AddOn:GetTaxiNodeName(nodeID)
+	nodeID = tonumber(nodeID)
+	if not nodeID then
+		return nil
+	end
+	local name = nodeNameByID[nodeID]
+	if name then
+		return name
+	end
+	if not nodeNameCacheReady then
+		AddOn:RefreshTaxiNodeNameCache()
+	end
+	return nodeNameByID[nodeID]
+end
+--------------------------------
+local function lookupNodeIDFromNodes(nodes, name)
+	if type(nodes) ~= "table" then
+		return nil
+	end
+	for _, node in ipairs(nodes) do
+		if node.name == name then
+			local id = AddOn:GetTaxiNodeID(node)
+			if id then
+				return id
+			end
+		end
+	end
+end
+--------------------------------
+local function lookupNodeIDByName(name)
+	if type(name) ~= "string" or name == "" or not C_TaxiMap then
+		return nil
+	end
+	local mapIDs, seen = {}, {}
+	local function addMapID(mapID)
+		if type(mapID) == "number" and mapID > 0 and not seen[mapID] then
+			seen[mapID] = true
+			mapIDs[#mapIDs + 1] = mapID
+		end
+	end
+	if GetTaxiMapID then
+		addMapID(GetTaxiMapID())
+	end
+	if AddOn.mapInfo then
+		addMapID(AddOn.mapInfo.mapID)
+	end
+	if AddOn.GetPlayerContinentMapID then
+		addMapID(AddOn:GetPlayerContinentMapID())
+	end
+	for i = 1, #mapIDs do
+		local mapID = mapIDs[i]
+		if C_TaxiMap.GetAllTaxiNodes then
+			local id = lookupNodeIDFromNodes(C_TaxiMap.GetAllTaxiNodes(mapID), name)
+			if id then
+				return id
+			end
+		end
+		if C_TaxiMap.GetTaxiNodesForMap then
+			local id = lookupNodeIDFromNodes(C_TaxiMap.GetTaxiNodesForMap(mapID), name)
+			if id then
+				return id
+			end
+		end
+	end
+end
+--------------------------------
+function AddOn:GetTaxiNodeIDForSlot(slot)
+	if type(slot) ~= "number" or slot < 1 then
+		return nil
+	end
+	local node = AddOn.taxiNodePositions and AddOn.taxiNodePositions[slot]
+	local id = AddOn:GetTaxiNodeID(node)
+	if id then
+		return id
+	end
+	if TaxiNodeName then
+		return lookupNodeIDByName(TaxiNodeName(slot))
+	end
+end
+--------------------------------
+function AddOn:GetHopTaxiNodeIDs(taxiNodeIndex, routeNodeIndex)
+	if type(taxiNodeIndex) ~= "number" or type(routeNodeIndex) ~= "number" then
+		return nil
+	end
+	local srcSlot = TaxiGetNodeSlot(taxiNodeIndex, routeNodeIndex, true)
+	local dstSlot = TaxiGetNodeSlot(taxiNodeIndex, routeNodeIndex, false)
+	local numRoutes = GetNumRoutes(taxiNodeIndex)
+	if (not dstSlot or dstSlot < 1) and routeNodeIndex == numRoutes then
+		dstSlot = taxiNodeIndex
+	end
+	local originID
+	if routeNodeIndex == 1 then
+		originID = AddOn:GetOriginTaxiNodeID()
+	end
+	if not originID then
+		originID = AddOn:GetTaxiNodeIDForSlot(srcSlot)
+	end
+	local destID
+	if routeNodeIndex == numRoutes then
+		destID = AddOn:GetTaxiNodeIDForSlot(taxiNodeIndex)
+	end
+	if not destID then
+		destID = AddOn:GetTaxiNodeIDForSlot(dstSlot)
+	end
+	return originID, destID
+end
+--------------------------------
+function AddOn:GetCurrentTaxiSlot()
+	local numNodes = NumTaxiNodes()
+	if not numNodes or numNodes < 1 then
+		return nil
+	end
+	for i = 1, numNodes do
+		if TaxiNodeGetType(i) == "CURRENT" then
+			return i
+		end
+	end
+end
+--------------------------------
+function AddOn:GetOriginTaxiNodeID()
+	local originID = AddOn:GetTaxiNodeID(AddOn.originTaxiNode)
+	if originID then
+		return originID
+	end
+	return AddOn:GetTaxiNodeIDForSlot(AddOn:GetCurrentTaxiSlot())
+end
+--------------------------------
+function AddOn:GetFlightTimeMeta(originNodeID, destNodeID)
+	originNodeID = tonumber(originNodeID)
+	destNodeID = tonumber(destNodeID)
+	if not originNodeID or not destNodeID then
+		return nil
+	end
+	local store = ensureStore(self)
+	if not store then
+		return nil
+	end
+	local from = tableGet(store.times, originNodeID)
+	return readTimeRecord(tableGet(from, destNodeID))
+end
+--------------------------------
+function AddOn:GetFlightTime(originNodeID, destNodeID)
+	local seconds = self:GetFlightTimeMeta(originNodeID, destNodeID)
+	return seconds
+end
+--------------------------------
+function AddOn:GetFlightTimeOrReverse(originNodeID, destNodeID)
+	local known = self:GetFlightTime(originNodeID, destNodeID)
+	if known then
+		return known, false
+	end
+	local reverse = self:GetFlightTime(destNodeID, originNodeID)
+	if reverse then
+		return reverse, true
+	end
+end
+--------------------------------
+local function writeTimeRecord(owner, originNodeID, destNodeID, seconds, n, silent)
+	local store = ensureStore(owner)
+	if not store then
+		return false
+	end
+	local from = store.times[originNodeID]
+	if type(from) ~= "table" then
+		from = {}
+		store.times[originNodeID] = from
+	end
+	from[destNodeID] = { seconds = seconds, n = n }
+	if not silent then
+		notifyObservation(owner, "t", originNodeID, destNodeID)
+	elseif owner.InvalidateSyncMerkle then
+		owner:InvalidateSyncMerkle()
+	end
+	return true
+end
+--------------------------------
+function AddOn:SetFlightTime(originNodeID, destNodeID, seconds)
+	originNodeID = tonumber(originNodeID)
+	destNodeID = tonumber(destNodeID)
+	seconds = math.floor(tonumber(seconds) or 0)
+	if not originNodeID or not destNodeID or seconds < 1 then
+		return
+	end
+	local oldSeconds, oldN = self:GetFlightTimeMeta(originNodeID, destNodeID)
+	local n = 1
+	if oldSeconds then
+		if math.abs(oldSeconds - seconds) / oldSeconds < 0.15 then
+			n = (oldN or 1) + 1
+			seconds = math.floor((oldSeconds * (oldN or 1) + seconds) / n + 0.5)
+		else
+			n = oldN or 1
+		end
+	end
+	writeTimeRecord(self, originNodeID, destNodeID, seconds, n, false)
+end
+--------------------------------
+function AddOn:ApplySyncedFlightTime(originNodeID, destNodeID, seconds, n)
+	originNodeID = tonumber(originNodeID)
+	destNodeID = tonumber(destNodeID)
+	seconds = math.floor(tonumber(seconds) or 0)
+	n = math.max(1, math.floor(tonumber(n) or 1))
+	if not originNodeID or not destNodeID or seconds < 1 then
+		return
+	end
+	writeTimeRecord(self, originNodeID, destNodeID, seconds, n, true)
+end
+--------------------------------
+function AddOn:ForEachFlightTime(fn)
+	if type(fn) ~= "function" then
+		return
+	end
+	local store = ensureStore(self)
+	if not store or type(store.times) ~= "table" then
+		return
+	end
+	for origin, tos in pairs(store.times) do
+		origin = tonumber(origin)
+		if origin and type(tos) == "table" then
+			for dest, value in pairs(tos) do
+				dest = tonumber(dest)
+				local seconds, n = readTimeRecord(value)
+				if dest and seconds then
+					fn(origin, dest, seconds, n)
+				end
+			end
+		end
+	end
+end
+--------------------------------
+function normalizePathSamples(samples)
+	if type(samples) ~= "table" then
+		return nil
+	end
+	local out = {}
+	local n = #samples
+	if n > 0 and type(samples[1]) == "table" then
+		for i = 1, n do
+			local s = samples[i]
+			if type(s) == "table" and s.x and s.y then
+				out[#out + 1] = s
+			end
+		end
+	else
+		local i = 1
+		while true do
+			local s = samples[i] or samples[tostring(i)]
+			if type(s) ~= "table" or not s.x or not s.y then
+				break
+			end
+			out[i] = s
+			i = i + 1
+		end
+	end
+	if #out > 0 then
+		return out
+	end
+end
+--------------------------------
+function AddOn:GetFlightPathMeta(originNodeID, destNodeID)
+	originNodeID = tonumber(originNodeID)
+	destNodeID = tonumber(destNodeID)
+	if not originNodeID or not destNodeID then
+		return nil
+	end
+	local store = ensurePathStore(self)
+	if not store then
+		return nil
+	end
+	local from = tableGet(store.paths, originNodeID)
+	return readPathRecord(tableGet(from, destNodeID))
+end
+--------------------------------
+function AddOn:GetFlightPath(originNodeID, destNodeID)
+	local samples = self:GetFlightPathMeta(originNodeID, destNodeID)
+	return samples
+end
+--------------------------------
+local function copyPathSamples(samples)
+	local copy = {}
+	for i = 1, #samples do
+		local p = samples[i]
+		if type(p) == "table" and p.x and p.y then
+			copy[#copy + 1] = {
+				x = p.x,
+				y = p.y,
+				z = p.z,
+				instanceID = p.instanceID,
+			}
+		end
+	end
+	if #copy < 1 then
+		return nil
+	end
+	return copy
+end
+--------------------------------
+local function writePathRecord(owner, originNodeID, destNodeID, samples, n, silent)
+	local store = ensurePathStore(owner)
+	if not store then
+		return false
+	end
+	local from = store.paths[originNodeID]
+	if type(from) ~= "table" then
+		from = {}
+		store.paths[originNodeID] = from
+	end
+	from[destNodeID] = { samples = samples, n = n }
+	if not silent then
+		notifyObservation(owner, "p", originNodeID, destNodeID)
+	elseif owner.InvalidateSyncMerkle then
+		owner:InvalidateSyncMerkle()
+	end
+	return true
+end
+--------------------------------
+function AddOn:SetFlightPath(originNodeID, destNodeID, samples)
+	originNodeID = tonumber(originNodeID)
+	destNodeID = tonumber(destNodeID)
+	if not originNodeID or not destNodeID or type(samples) ~= "table" then
+		return
+	end
+	local copy = copyPathSamples(samples)
+	if not copy then
+		return
+	end
+	local _, oldN = self:GetFlightPathMeta(originNodeID, destNodeID)
+	writePathRecord(self, originNodeID, destNodeID, copy, (oldN or 0) + 1, false)
+end
+--------------------------------
+function AddOn:ApplySyncedFlightPath(originNodeID, destNodeID, samples, n)
+	originNodeID = tonumber(originNodeID)
+	destNodeID = tonumber(destNodeID)
+	n = math.max(1, math.floor(tonumber(n) or 1))
+	if not originNodeID or not destNodeID or type(samples) ~= "table" then
+		return
+	end
+	local copy = copyPathSamples(samples)
+	if not copy then
+		return
+	end
+	writePathRecord(self, originNodeID, destNodeID, copy, n, true)
+end
+--------------------------------
+function AddOn:ForEachFlightPath(fn)
+	if type(fn) ~= "function" then
+		return
+	end
+	local store = ensurePathStore(self)
+	if not store or type(store.paths) ~= "table" then
+		return
+	end
+	for origin, tos in pairs(store.paths) do
+		origin = tonumber(origin)
+		if origin and type(tos) == "table" then
+			for dest, value in pairs(tos) do
+				dest = tonumber(dest)
+				local samples, n = readPathRecord(value)
+				if dest and samples then
+					fn(origin, dest, samples, n)
+				end
+			end
+		end
+	end
+end
+--------------------------------
+function AddOn:CountKnownFlightData()
+	local times, paths = 0, 0
+	self:ForEachFlightTime(function()
+		times = times + 1
+	end)
+	self:ForEachFlightPath(function()
+		paths = paths + 1
+	end)
+	return times, paths
+end
+--------------------------------
+function AddOn:GetKnownFlightPairs()
+	local byKey = {}
+	local list = {}
+	local function pair(origin, dest)
+		local key = origin .. ":" .. dest
+		local row = byKey[key]
+		if not row then
+			row = {
+				originNodeID = origin,
+				destNodeID = dest,
+				seconds = nil,
+				hasPath = false,
+			}
+			byKey[key] = row
+			list[#list + 1] = row
+		end
+		return row
+	end
+	self:ForEachFlightTime(function(origin, dest, seconds)
+		pair(origin, dest).seconds = seconds
+	end)
+	self:ForEachFlightPath(function(origin, dest)
+		pair(origin, dest).hasPath = true
+	end)
+	return list
+end
+--------------------------------
+function AddOn:PrintFlightDataCount()
+	local times, paths = self:CountKnownFlightData()
+	self:Print(string.format(self.L.flightDataCount, times, paths))
+end
+--------------------------------
+function AddOn:WipeFactionFlightTimes()
+	local store = ensureStore(self)
+	if store then
+		store.times = {}
+	end
+	local paths = ensurePathStore(self)
+	if paths then
+		paths.paths = {}
+	end
+	if self.InvalidateSyncMerkle then
+		self:InvalidateSyncMerkle()
+	end
+end
+--------------------------------
+function AddOn:EstimateFlightTime(destSlot)
+	if type(destSlot) ~= "number" or destSlot < 1 then
+		return nil
+	end
+	local numRoutes = GetNumRoutes(destSlot)
+	if not numRoutes or numRoutes < 1 then
+		return nil
+	end
+	local total = 0
+	for hop = 1, numRoutes do
+		local originID, destID = AddOn:GetHopTaxiNodeIDs(destSlot, hop)
+		local leg = AddOn:GetFlightTimeOrReverse(originID, destID)
+		if not leg then
+			return nil
+		end
+		total = total + leg
+	end
+	if total < 1 then
+		return nil
+	end
+	return total
+end
+--------------------------------
+function AddOn:GetDisplayedFlightTime(destSlot)
+	local originID = AddOn:GetOriginTaxiNodeID()
+	local destID = AddOn:GetTaxiNodeIDForSlot(destSlot)
+	local seconds, fromReverse = AddOn:GetFlightTimeOrReverse(originID, destID)
+	if seconds then
+		return seconds, fromReverse
+	end
+	local estimate = AddOn:EstimateFlightTime(destSlot)
+	if estimate then
+		return estimate, true
+	end
+end
+--------------------------------
+function AddOn:FormatFlightTime(seconds)
+	seconds = math.floor(tonumber(seconds) or 0)
+	if seconds < 0 then
+		seconds = 0
+	end
+	local minutes = math.floor(seconds / 60)
+	local secs = seconds % 60
+	if TIMER_MINUTES_DISPLAY then
+		return string.format(TIMER_MINUTES_DISPLAY, minutes, secs)
+	end
+	return string.format("%d:%02d", minutes, secs)
+end
+--------------------------------
+function AddOn:FormatEstimatedFlightTime(seconds)
+	return "\226\137\136 " .. AddOn:FormatFlightTime(seconds)
+end
+--------------------------------
+function AddOn:AddFlightTimeTooltipLine(destSlot)
+	if not AddOn:GetShowFlightTimes() then
+		return
+	end
+	local L = AddOn.L
+	local seconds, estimated = AddOn:GetDisplayedFlightTime(destSlot)
+	if seconds then
+		local formatted
+		if estimated then
+			formatted = AddOn:FormatEstimatedFlightTime(seconds)
+		else
+			formatted = AddOn:FormatFlightTime(seconds)
+		end
+		GameTooltip:AddLine("|cffffd100" .. L.flightTimeLabel .. "|r |cffffffff" .. formatted .. "|r", 1, 1, 1)
+		return
+	end
+	GameTooltip:AddLine("|cff808080" .. L.flightTimeLabel .. " " .. L.flightTimeUnknown .. "|r", 0.5, 0.5, 0.5)
+end
+--------------------------------
+local function nowServerTime()
+	if GetServerTime then
+		return GetServerTime()
+	end
+	return time()
+end
+--------------------------------
+local function clearActiveFlight()
+	if AddOn.db and AddOn.db.global then
+		AddOn.db.global.activeFlight = nil
+	end
+end
+--------------------------------
+local function persistActiveFlight()
+	if not AddOn.db or not AddOn.db.global then
+		return
+	end
+	if not pending or not pending.confirmed or not pending.duration or pending.duration < 1 then
+		AddOn.db.global.activeFlight = nil
+		return
+	end
+	AddOn.db.global.activeFlight = {
+		originID = pending.originID,
+		destID = pending.destID,
+		destName = pending.destName,
+		duration = pending.duration,
+		estimated = pending.estimated,
+		startServerTime = pending.startServerTime,
+		invalid = pending.invalid,
+		arrivalClock = pending.arrivalClock,
+		numHops = pending.numHops,
+		known = pending.known,
+		pathSamples = pending.pathSamples,
+	}
+end
+--------------------------------
+local function stopFlightPathSampling()
+	if pathTimer then
+		AddOn.Timer:CancelTimer(pathTimer)
+		pathTimer = nil
+	end
+end
+--------------------------------
+local function sampleFlightPath()
+	if not pending then
+		return
+	end
+	pending.pathSamples = pending.pathSamples or {}
+	if type(AddOn.GetPlayerWorldPosition) == "function" then
+		local pos = AddOn:GetPlayerWorldPosition()
+		if not pos then
+			return
+		end
+		pending.pathSamples[#pending.pathSamples + 1] = pos
+	end
+end
+--------------------------------
+local function startFlightPathSampling()
+	stopFlightPathSampling()
+	if not pending then
+		return
+	end
+	pending.pathSamples = pending.pathSamples or {}
+	sampleFlightPath()
+	pathTimer = AddOn.Timer:ScheduleRepeatingTimer(function()
+		if pending and pending.confirmed and UnitOnTaxi("player") then
+			sampleFlightPath()
+		end
+	end, PATH_SAMPLE_INTERVAL)
+end
+--------------------------------
+function AddOn:AbortFlightTimeSample()
+	local wasFlying = pending and pending.confirmed
+	stopFlightPathSampling()
+	if watchTimer then
+		AddOn.Timer:CancelTimer(watchTimer)
+		watchTimer = nil
+	end
+	if controlEventRegistered then
+		AddOn:UnregisterEvent("PLAYER_CONTROL_GAINED")
+		controlEventRegistered = false
+	end
+	pending = nil
+	clearActiveFlight()
+	if wasFlying then
+		AddOn:SendMessage(AddOn.Message.TAXI_END)
+	end
+end
+--------------------------------
+local function finishFlightTimeSample()
+	if not pending or not pending.confirmed then
+		return
+	end
+	if UnitOnTaxi("player") then
+		return
+	end
+	local originID = pending.originID
+	local destID = pending.destID
+	local startTime = pending.startTime
+	local invalid = pending.invalid
+	sampleFlightPath()
+	local pathSamples = pending.pathSamples
+	AddOn:AbortFlightTimeSample()
+	if invalid then
+		return
+	end
+	local elapsed = math.floor(GetTime() - startTime + 0.5)
+	if elapsed > 0 then
+		AddOn:SetFlightTime(originID, destID, elapsed)
+	end
+	if type(pathSamples) == "table" and #pathSamples > 0 then
+		AddOn:SetFlightPath(originID, destID, pathSamples)
+	end
+end
+--------------------------------
+local function confirmTakeoff()
+	if not pending or pending.confirmed then
+		return
+	end
+	pending.confirmed = true
+	pending.startTime = GetTime()
+	pending.startServerTime = nowServerTime()
+	if AddOn.FormatArrivalClock then
+		pending.arrivalClock = AddOn:FormatArrivalClock(pending.duration)
+	end
+	if not controlEventRegistered then
+		controlEventRegistered = true
+		AddOn:RegisterEvent("PLAYER_CONTROL_GAINED", "OnFlightTimeControlGained")
+	end
+	startFlightPathSampling()
+	persistActiveFlight()
+	AddOn:SendMessage(
+		AddOn.Message.TAXI_START,
+		pending.originID,
+		pending.destID,
+		pending.duration,
+		pending.destName,
+		pending.estimated,
+		pending.arrivalClock,
+		pending.numHops,
+		pending.known
+	)
+end
+--------------------------------
+local function startFlightTimeWatch()
+	if watchTimer then
+		AddOn.Timer:CancelTimer(watchTimer)
+		watchTimer = nil
+	end
+	local elapsed = 0
+	watchTimer = AddOn.Timer:ScheduleRepeatingTimer(function()
+		if not pending then
+			return
+		end
+		if not pending.confirmed then
+			if UnitOnTaxi("player") then
+				confirmTakeoff()
+				return
+			end
+			elapsed = elapsed + TAKEOFF_INTERVAL
+			if elapsed >= TAKEOFF_TIMEOUT then
+				AddOn:AbortFlightTimeSample()
+			end
+			return
+		end
+		finishFlightTimeSample()
+	end, TAKEOFF_INTERVAL)
+end
+--------------------------------
+function AddOn:OnTakeTaxiNode(index)
+	-- TODO we should show an inflight control so the early landing and sound control are still available.
+	-- we could do this by altering the flight destination text widget to have all borders but be be one
+	-- layer below the progress frame, so that when the progress frame is hidden in this state.
+	-- OR, when the flight time is unknown create loop animation of the progress bar with the text
+	-- "Learning about this flight path
+	if not AddOn:GetEnabled() then
+		return
+	end
+	AddOn:AbortFlightTimeSample()
+	if type(index) ~= "number" or index < 1 then
+		return
+	end
+
+	local originID = AddOn:GetOriginTaxiNodeID()
+	local destID = AddOn:GetTaxiNodeIDForSlot(index)
+	if not originID or not destID or originID == destID then
+		return
+	end
+
+	local destName
+	local destNode = AddOn.taxiNodePositions and AddOn.taxiNodePositions[index]
+	if destNode and destNode.name then
+		destName = destNode.name
+	elseif TaxiNodeName then
+		destName = TaxiNodeName(index)
+	end
+
+	local flightTime, fromReverse = AddOn:GetFlightTimeOrReverse(originID, destID)
+	local known = flightTime ~= nil and not fromReverse
+	local numHops = GetNumRoutes and GetNumRoutes(index)
+	pending = {
+		originID = originID,
+		destID = destID,
+		startTime = GetTime(),
+		confirmed = false,
+		invalid = false,
+		duration = flightTime or AddOn:EstimateFlightTime(index),
+		destName = destName,
+		estimated = not known,
+		numHops = tonumber(numHops),
+		known = known,
+	}
+
+	if UnitOnTaxi("player") then
+		confirmTakeoff()
+	end
+	startFlightTimeWatch()
+end
+--------------------------------
+function AddOn:OnFlightTimeControlGained()
+	local playSound = AddOn.ShouldFlightTimerPlayArrivalSound and AddOn:ShouldFlightTimerPlayArrivalSound()
+	finishFlightTimeSample()
+	if playSound then
+		AddOn:PlayArrivalSound()
+	end
+end
+--------------------------------
+local function invalidateFlightTimeSample()
+	if pending then
+		pending.invalid = true
+		persistActiveFlight()
+	end
+	if AddOn.flightTimerState then
+		AddOn.flightTimerState.earlyLandingRequested = true
+		if AddOn.UpdateFlightTimerEarlyLandingButton then
+			AddOn:UpdateFlightTimerEarlyLandingButton()
+		end
+	end
+end
+--------------------------------
+local function restoredProgressIsValid(saved, elapsed)
+	if type(saved) ~= "table" or saved.invalid then
+		return false
+	end
+	local duration = tonumber(saved.duration)
+	if not duration or duration < 1 then
+		return false
+	end
+	if not tonumber(saved.startServerTime) then
+		return false
+	end
+	if type(elapsed) ~= "number" or elapsed < 0 or elapsed >= duration then
+		return false
+	end
+	return true
+end
+--------------------------------
+function AddOn:RestoreInFlightSession()
+	local saved = AddOn.db and AddOn.db.global and AddOn.db.global.activeFlight
+	if type(saved) ~= "table" or not tonumber(saved.startServerTime) or not tonumber(saved.duration) then
+		return
+	end
+	local attempts = 0
+	local function tryRestore()
+		if UnitOnTaxi("player") then
+			local elapsed = nowServerTime() - saved.startServerTime
+			if elapsed < 0 then
+				clearActiveFlight()
+				return
+			end
+			pending = {
+				originID = saved.originID,
+				destID = saved.destID,
+				destName = saved.destName,
+				duration = saved.duration,
+				estimated = saved.estimated,
+				confirmed = true,
+				invalid = saved.invalid,
+				startServerTime = saved.startServerTime,
+				startTime = GetTime() - elapsed,
+				arrivalClock = saved.arrivalClock,
+				numHops = saved.numHops,
+				known = saved.known,
+				pathSamples = saved.pathSamples,
+			}
+			if not controlEventRegistered then
+				controlEventRegistered = true
+				AddOn:RegisterEvent("PLAYER_CONTROL_GAINED", "OnFlightTimeControlGained")
+			end
+			startFlightPathSampling()
+			startFlightTimeWatch()
+			if restoredProgressIsValid(saved, elapsed) then
+				AddOn:StartFlightTimerBar(
+					saved.originID,
+					saved.destID,
+					saved.duration,
+					saved.destName,
+					saved.estimated,
+					elapsed,
+					saved.arrivalClock,
+					saved.numHops,
+					saved.known
+				)
+			end
+			return
+		end
+		attempts = attempts + 1
+		if attempts >= 50 then
+			clearActiveFlight()
+			return
+		end
+		AddOn.Timer:ScheduleTimer(tryRestore, TAKEOFF_INTERVAL)
+	end
+	tryRestore()
+end
+--------------------------------
+function AddOn:InitTaxiLog()
+	if AddOn.db and AddOn.db.global then
+		AddOn.db.global.taxiLog = nil
+		AddOn.db.global.flightTimes = nil
+		AddOn.db.global.flightPaths = nil
+	end
+	ensureStore(self)
+	ensurePathStore(self)
+	if self.InvalidateSyncMerkle then
+		self:InvalidateSyncMerkle()
+	end
+
+	AddOn:SecureHook("TaxiRequestEarlyLanding", invalidateFlightTimeSample)
+	if ConfirmSummon then
+		AddOn:SecureHook("ConfirmSummon", invalidateFlightTimeSample)
+	end
+	if C_SummonInfo and C_SummonInfo.ConfirmSummon then
+		AddOn:SecureHook(C_SummonInfo, "ConfirmSummon", invalidateFlightTimeSample)
 	end
 end

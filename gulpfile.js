@@ -38,11 +38,25 @@ function configure(cb) {
     .pipe(touch());
 }
 //////////////////////////////////
-function codes(cb) {
+const TEST_LUA_GLOB = "!src/Sync/ConvergeTest.lua";
+const TEST_EMBED = /^[ \t]*<Include file="Sync\\ConvergeTest.lua" \/>\r?\n/gm;
+
+function copyCodes(includeTest) {
   const output = path.join("build", util.name);
-  return src(["src/**/*.lua", "src/**/*.xml"], { ignoreInitial: false })
-    .pipe(dest(output))
-    .pipe(touch());
+  const globs = includeTest
+    ? ["src/**/*.lua", "src/**/*.xml"]
+    : ["src/**/*.lua", "src/**/*.xml", TEST_LUA_GLOB];
+  const stream = src(globs, { ignoreInitial: false });
+  if (!includeTest) {
+    return stream.pipe(replace(TEST_EMBED, "")).pipe(dest(output)).pipe(touch());
+  }
+  return stream.pipe(dest(output)).pipe(touch());
+}
+function codes() {
+  return copyCodes(true);
+}
+function codesRelease() {
+  return copyCodes(false);
 }
 function attributions(cb) {
   const output = path.join("build", util.name);
@@ -53,7 +67,7 @@ function attributions(cb) {
 //////////////////////////////////
 function assets(cb) {
   const output = path.join("build", util.name, "assets");
-  const files = ["src/assets/icon.tga"];
+  const files = ["src/assets/icon.tga", "src/assets/*.ogg", "src/assets/*.png"];
   return src(files, { ignoreInitial: false, encoding: false })
     .pipe(dest(output))
     .pipe(touch());
@@ -138,13 +152,7 @@ async function addons() {
   const glob = `${addonBuild.replaceAll("\\", "/")}/**/*`;
 
   for (const flavor of wowFlavors) {
-    const output = path.join(
-      wowRoot,
-      flavor,
-      "Interface",
-      "AddOns",
-      util.name,
-    );
+    const output = path.join(wowRoot, flavor, "Interface", "AddOns", util.name);
     console.log("Copying build to " + output);
     deleteSync([output.replaceAll("\\", "/")], { force: true });
     await streamDone(
@@ -171,4 +179,12 @@ export function archive(cb) {
   }, 1000);
 }
 //////////////////////////////////
-export const build = series(clean, codes, assets, toc, attributions, archive);
+export const test = series(codes, assets, toc, addons);
+export const build = series(
+  clean,
+  codesRelease,
+  assets,
+  toc,
+  attributions,
+  archive,
+);

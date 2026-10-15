@@ -46,6 +46,47 @@ function AddOn:GetPlayerMapPosition()
 	end
 end
 --------------------------------
+function AddOn:GetPlayerWorldPosition()
+	if UnitPosition then
+		local posY, posX, posZ, instanceID = UnitPosition("player")
+		if posX and posY then
+			return {
+				x = posX,
+				y = posY,
+				z = posZ,
+				instanceID = instanceID,
+			}
+		end
+	end
+	local mapID = C_Map.GetBestMapForUnit and C_Map.GetBestMapForUnit("player")
+	if not mapID or not C_Map.GetPlayerMapPosition or not C_Map.GetWorldPosFromMapPos then
+		return
+	end
+	local mapPos = C_Map.GetPlayerMapPosition(mapID, "player")
+	if not mapPos then
+		return
+	end
+	local x, y = AddOn:GetPositionXY(mapPos)
+	if not x or not y then
+		return
+	end
+	local fromPos = (CreateVector2D and CreateVector2D(x, y)) or { x = x, y = y }
+	local continentID, worldPos = C_Map.GetWorldPosFromMapPos(mapID, fromPos)
+	if not continentID or not worldPos then
+		return
+	end
+	local wx, wy = AddOn:GetPositionXY(worldPos)
+	if not wx or not wy then
+		return
+	end
+	-- Store in UnitPosition order (x = east-west, y = north-south).
+	return {
+		x = wy,
+		y = wx,
+		instanceID = continentID,
+	}
+end
+--------------------------------
 function AddOn:GetPositionXY(position)
 	if not position then
 		return
@@ -54,6 +95,41 @@ function AddOn:GetPositionXY(position)
 		return position:GetXY()
 	end
 	return position.x, position.y
+end
+--------------------------------
+function AddOn:WorldToMapXY(worldX, worldY, instanceID, toMapID)
+	if not worldX or not worldY or not toMapID or not C_Map.GetMapPosFromWorldPos then
+		return
+	end
+	-- World x/y follow UnitPosition (east-west, north-south). C_Map world Vector2D is
+	-- rotated 90°: Vector2D.x is north-south, Vector2D.y is east-west.
+	local vector = (CreateVector2D and CreateVector2D(worldY, worldX)) or { x = worldY, y = worldX }
+	local function tryConvert(continentID)
+		if not continentID then
+			return
+		end
+		local ok, mapIDOrPos, mapPos = pcall(C_Map.GetMapPosFromWorldPos, continentID, vector, toMapID)
+		if not ok then
+			return
+		end
+		if mapPos then
+			return AddOn:GetPositionXY(mapPos)
+		end
+		if type(mapIDOrPos) == "table" then
+			return AddOn:GetPositionXY(mapIDOrPos)
+		end
+	end
+	local x, y = tryConvert(instanceID)
+	if x then
+		return x, y
+	end
+	if C_Map.GetWorldPosFromMapPos then
+		local origin = (CreateVector2D and CreateVector2D(0.5, 0.5)) or { x = 0.5, y = 0.5 }
+		local mapInstance = C_Map.GetWorldPosFromMapPos(toMapID, origin)
+		if mapInstance and mapInstance ~= instanceID then
+			return tryConvert(mapInstance)
+		end
+	end
 end
 --------------------------------
 function AddOn:ConvertMapPosition(position, fromMapID, toMapID)
